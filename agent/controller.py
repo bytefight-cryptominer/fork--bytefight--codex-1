@@ -84,9 +84,10 @@ class PlayerController:
             # Hard safety: don't step on enemy cell near opponent
             if cell_owner(nr, nc) == self.opp and d_opp <= SAFE_DIST:
                 continue
-            # Don't walk into opponent
-            if d_opp == 0:
-                continue
+            # Don't walk into opponent (collision) unless we'd win
+            if nr == opp_r and nc == opp_c:
+                if cell_owner(nr, nc) != player_parity:
+                    continue  # we'd lose or it's risky on neutral
             d_enum = DIR_MAP[(dr, dc)]
             visited.add((nr, nc))
             queue.append((nr, nc, d_enum, 1))
