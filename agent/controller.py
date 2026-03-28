@@ -1,13 +1,21 @@
 from collections.abc import Callable, Iterable
 from collections import deque
-from typing import Union, List, Tuple, Optional
+from typing import Union, List, Tuple
 
 from game import *
+import random
 
 
 class PlayerController:
     """
-    BFS expansion agent with collision avoidance, hill capture, and stamina management.
+    BFS expansion agent v2: move toward frontier, paint after moving.
+
+    Strategy:
+    - BFS from current pos to find nearest unpainted/neutral/hill cell
+    - Move toward that target
+    - Paint adjacent cells after moving (prioritize hills, neutral cells)
+    - Collision avoidance: never step on enemy cell within SAFE_DIST of opponent
+    - Stamina management: keep reserve, don't over-paint
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -26,252 +34,156 @@ class PlayerController:
         me = board.get_player(player_parity)
         opp = board.get_opponent(player_parity)
         rows, cols = board.board_size.r, board.board_size.c
+        my_r, my_c = me.loc.r, me.loc.c
+        opp_r, opp_c = opp.loc.r, opp.loc.c
 
-        # Precompute cell ownership grid for speed
-        own_grid = [[0] * cols for _ in range(rows)]
-        wall_grid = [[False] * cols for _ in range(rows)]
-        for r in range(rows):
-            for c in range(cols):
-                cell = board.cells[r][c]
-                own_grid[r][c] = cell.owner_parity
-                wall_grid[r][c] = cell.is_wall
+        SAFE_DIST = 5
+        DIRS = [(-1, 0, Direction.UP), (1, 0, Direction.DOWN),
+                (0, -1, Direction.LEFT), (0, 1, Direction.RIGHT)]
 
-        my_loc = me.loc
-        opp_loc = opp.loc
+        def valid(r, c):
+            return 0 <= r < rows and 0 <= c < cols and not board.cells[r][c].is_wall
 
-        # Manhattan distance to opponent
-        def mdist(r, c, tr, tc):
-            return abs(r - tr) + abs(c - tc)
+        def mdist(r1, c1, r2, c2):
+            return abs(r1 - r2) + abs(c1 - c2)
 
-        opp_dist = mdist(my_loc.r, my_loc.c, opp_loc.r, opp_loc.c)
+        # BFS to find the best target cell to move toward
+        # Priority: uncaptured hill > neutral > enemy (far from opp) > reinforce own
+        best_target = None
+        best_first_dir = None
+        best_priority = -1
 
-        # Safety: distance threshold for collision avoidance
-        SAFE_DIST = 6
+        visited = set()
+        visited.add((my_r, my_c))
+        # (r, c, first_direction, depth)
+        queue = deque()
 
-        # Direction map
-        DIRS = [
-            (Direction.UP, -1, 0),
-            (Direction.DOWN, 1, 0),
-            (Direction.LEFT, 0, -1),
-            (Direction.RIGHT, 0, 1),
-        ]
-
-        def is_valid(r, c):
-            return 0 <= r < rows and 0 <= c < cols and not wall_grid[r][c]
-
-        def is_enemy_cell(r, c):
-            return own_grid[r][c] == self.opp
-
-        def is_my_cell(r, c):
-            return own_grid[r][c] == player_parity
-
-        def is_neutral(r, c):
-            return own_grid[r][c] == 0
-
-        # BFS from current position to find best expansion target
-        # Prioritize: hills > neutral cells > reinforcing own territory
-        # Avoid: enemy cells near opponent (collision risk)
-
-        best_dir = None
-        best_score = -999999
-
-        for d_enum, dr, dc in DIRS:
-            nr, nc = my_loc.r + dr, my_loc.c + dc
-            if not is_valid(nr, nc):
+        for dr, dc, d_enum in DIRS:
+            nr, nc = my_r + dr, my_c + dc
+            if not valid(nr, nc):
                 continue
-
-            # Hard safety: never step on enemy cell when close to opponent
-            dist_to_opp = mdist(nr, nc, opp_loc.r, opp_loc.c)
-            if is_enemy_cell(nr, nc) and dist_to_opp <= SAFE_DIST:
-                continue
-
-            # Even on neutral, avoid going adjacent to opponent on their territory
-            if dist_to_opp <= 1 and is_enemy_cell(nr, nc):
-                continue
-
-            score = 0.0
-
-            # Prefer cells that aren't ours (expansion)
-            if is_neutral(nr, nc):
-                score += 50
-            elif is_enemy_cell(nr, nc):
-                score += 30  # stepping on enemy removes a layer
-            elif is_my_cell(nr, nc):
-                score += 0
-
-            # Hill bonus: strongly prefer moving toward/onto hill cells
+            # Safety check
+            d_opp = mdist(nr, nc, opp_r, opp_c)
             cell = board.cells[nr][nc]
+            if cell.owner_parity == self.opp and d_opp <= SAFE_DIST:
+                continue
+            if d_opp <= 1 and cell.owner_parity == self.opp:
+                continue
+            visited.add((nr, nc))
+            queue.append((nr, nc, d_enum, 1))
+
+        while queue:
+            r, c, first_dir, depth = queue.popleft()
+            if depth > 20:
+                break
+
+            cell = board.cells[r][c]
+            priority = -1
+
+            # Uncaptured hill cell we don't own
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
                 if hill.controller_parity != player_parity:
-                    score += 200  # uncaptured hill cell
-                else:
-                    score += 20  # already captured
+                    if cell.owner_parity != player_parity:
+                        priority = 1000 - depth * 10
+                    else:
+                        priority = 500 - depth * 10
 
-            # BFS lookahead: count expansion opportunities within 4 steps
-            expansion_count = self._bfs_expansion_score(
-                nr, nc, rows, cols, own_grid, wall_grid, player_parity,
-                opp_loc.r, opp_loc.c, SAFE_DIST
-            )
-            score += expansion_count * 3
+            # Neutral cell (expansion)
+            if cell.owner_parity == 0 and priority < 0:
+                priority = 800 - depth * 15
 
-            # Bias away from opponent when close
-            if opp_dist <= 8:
-                score += dist_to_opp * 5
+            # Enemy cell far from opponent
+            if cell.owner_parity == self.opp and priority < 0:
+                d_opp = mdist(r, c, opp_r, opp_c)
+                if d_opp > SAFE_DIST:
+                    priority = 200 - depth * 10
 
-            # Slight randomness to avoid predictable patterns
-            import random
-            score += random.random() * 2
+            if priority > best_priority:
+                best_priority = priority
+                best_target = (r, c)
+                best_first_dir = first_dir
 
-            if score > best_score:
-                best_score = score
-                best_dir = d_enum
+            # Continue BFS
+            if depth < 20:
+                for dr, dc, _ in DIRS:
+                    nr, nc = r + dr, c + dc
+                    if (nr, nc) in visited:
+                        continue
+                    if not valid(nr, nc):
+                        continue
+                    # Don't path through enemy territory near opponent
+                    d_opp = mdist(nr, nc, opp_r, opp_c)
+                    if board.cells[nr][nc].owner_parity == self.opp and d_opp <= SAFE_DIST:
+                        continue
+                    visited.add((nr, nc))
+                    queue.append((nr, nc, first_dir, depth + 1))
 
-        if best_dir is None:
-            # Fallback: pick any valid direction
-            for d_enum, dr, dc in DIRS:
-                nr, nc = my_loc.r + dr, my_loc.c + dc
-                if is_valid(nr, nc):
-                    best_dir = d_enum
+        # Fallback: just move somewhere valid
+        if best_first_dir is None:
+            for dr, dc, d_enum in DIRS:
+                nr, nc = my_r + dr, my_c + dc
+                if valid(nr, nc):
+                    best_first_dir = d_enum
                     break
+            if best_first_dir is None:
+                return Action.Move(Direction.UP)
 
-        if best_dir is None:
-            return Action.Move(Direction.UP)
+        actions: List = []
 
-        actions: List[Action.Move | Action.Paint] = []
+        # Move first
+        actions.append(Action.Move(best_first_dir))
 
-        # Paint before moving: paint adjacent neutral/friendly cells
-        paint_actions = self._get_paint_actions(board, player_parity, me)
+        # Calculate new position after move
+        dir_delta = {Direction.UP: (-1, 0), Direction.DOWN: (1, 0),
+                     Direction.LEFT: (0, -1), Direction.RIGHT: (0, 1)}
+        dr, dc = dir_delta[best_first_dir]
+        new_r, new_c = my_r + dr, my_c + dc
 
-        # Move
-        actions.append(Action.Move(best_dir))
+        if not valid(new_r, new_c):
+            return actions
 
-        # Paint after moving
-        dr_map = {Direction.UP: (-1, 0), Direction.DOWN: (1, 0),
-                  Direction.LEFT: (0, -1), Direction.RIGHT: (0, 1)}
-        dr, dc = dr_map[best_dir]
-        new_r, new_c = my_loc.r + dr, my_loc.c + dc
+        # Paint after moving: paint cells adjacent to new position
+        # Budget: keep at least 20 stamina in reserve
+        stamina_available = me.stamina - 20  # rough estimate
+        paint_candidates = []
 
-        if is_valid(new_r, new_c):
-            post_paint = self._get_paint_actions_from(
-                board, player_parity, new_r, new_c, me.stamina - 15  # rough estimate after move
-            )
-            actions.extend(post_paint)
-
-        # Add pre-move paints
-        actions = paint_actions + actions
-
-        return actions
-
-    def _bfs_expansion_score(self, sr, sc, rows, cols, own_grid, wall_grid,
-                              parity, opp_r, opp_c, safe_dist, max_depth=4):
-        """Count reachable non-owned cells within max_depth BFS steps."""
-        visited = set()
-        visited.add((sr, sc))
-        queue = deque([(sr, sc, 0)])
-        count = 0
-        opp_parity = -parity
-
-        while queue:
-            r, c, depth = queue.popleft()
-            if depth >= max_depth:
+        for dr2, dc2, _ in DIRS:
+            pr, pc = new_r + dr2, new_c + dc2
+            if not (0 <= pr < rows and 0 <= pc < cols):
+                continue
+            pcell = board.cells[pr][pc]
+            if pcell.is_wall:
+                continue
+            if pcell.beacon_parity == player_parity:
+                continue
+            # Can only paint neutral or own cells
+            if pcell.owner_parity != player_parity and pcell.owner_parity != 0:
+                continue
+            # Skip if already at max paint
+            if pcell.owner_parity == player_parity and abs(pcell.paint_value) >= GameConstants.MAX_PAINT_VALUE:
                 continue
 
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = r + dr, c + dc
-                if (nr, nc) in visited:
-                    continue
-                if not (0 <= nr < rows and 0 <= nc < cols):
-                    continue
-                if wall_grid[nr][nc]:
-                    continue
+            # Scoring for paint priority
+            pscore = 0
+            if pcell.hill_id and pcell.hill_id != 0:
+                pscore += 100  # paint hill cells first
+            if pcell.owner_parity == 0:
+                pscore += 50  # paint neutral cells
+            else:
+                pscore += 10  # reinforce own cells
 
-                visited.add((nr, nc))
+            paint_candidates.append((pscore, pr, pc))
 
-                # Don't expand through enemy territory when near opponent
-                d_opp = abs(nr - opp_r) + abs(nc - opp_c)
-                if own_grid[nr][nc] == opp_parity and d_opp <= safe_dist:
-                    continue
+        # Sort by priority
+        paint_candidates.sort(key=lambda x: -x[0])
 
-                if own_grid[nr][nc] != parity:
-                    count += 1
-
-                queue.append((nr, nc, depth + 1))
-
-        return count
-
-    def _get_paint_actions(self, board, player_parity, player) -> List[Action.Paint]:
-        """Get paint actions for cells adjacent to current position."""
-        actions = []
-        loc = player.loc
-        rows, cols = board.board_size.r, board.board_size.c
-        stamina = player.stamina
-
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nr, nc = loc.r + dr, loc.c + dc
-            if not (0 <= nr < rows and 0 <= nc < cols):
-                continue
-            cell = board.cells[nr][nc]
-            if cell.is_wall:
-                continue
-            if cell.beacon_parity == player_parity:
-                continue
-            # Only paint neutral or own cells (can't paint enemy)
-            if cell.owner_parity != player_parity and cell.owner_parity != 0:
-                continue
-            # Don't paint if already at max
-            if cell.owner_parity == player_parity and abs(cell.paint_value) >= GameConstants.MAX_PAINT_VALUE:
-                continue
-            if stamina < GameConstants.PAINT_STAMINA_COST:
-                break
-
-            # Prioritize painting hill cells
-            priority = 0
-            if cell.hill_id and cell.hill_id != 0:
-                priority = 1
-
-            actions.append((priority, Action.Paint(Location(nr, nc))))
-            stamina -= GameConstants.PAINT_STAMINA_COST
-
-        # Sort by priority (hills first)
-        actions.sort(key=lambda x: -x[0])
-
-        # Keep stamina reserve for movement
-        min_reserve = 30
-        result = []
         cost = 0
-        for _, action in actions:
-            if player.stamina - cost - GameConstants.PAINT_STAMINA_COST < min_reserve:
+        for _, pr, pc in paint_candidates:
+            if cost + GameConstants.PAINT_STAMINA_COST > stamina_available:
                 break
-            result.append(action)
+            actions.append(Action.Paint(Location(pr, pc)))
             cost += GameConstants.PAINT_STAMINA_COST
-
-        return result
-
-    def _get_paint_actions_from(self, board, player_parity, r, c, remaining_stamina) -> List[Action.Paint]:
-        """Get paint actions for cells adjacent to a position."""
-        actions = []
-        rows, cols = board.board_size.r, board.board_size.c
-        min_reserve = 20
-
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nr, nc = r + dr, c + dc
-            if not (0 <= nr < rows and 0 <= nc < cols):
-                continue
-            cell = board.cells[nr][nc]
-            if cell.is_wall:
-                continue
-            if cell.beacon_parity == player_parity:
-                continue
-            if cell.owner_parity != player_parity and cell.owner_parity != 0:
-                continue
-            if cell.owner_parity == player_parity and abs(cell.paint_value) >= GameConstants.MAX_PAINT_VALUE:
-                continue
-            if remaining_stamina < GameConstants.PAINT_STAMINA_COST + min_reserve:
-                break
-
-            actions.append(Action.Paint(Location(nr, nc)))
-            remaining_stamina -= GameConstants.PAINT_STAMINA_COST
 
         return actions
 
