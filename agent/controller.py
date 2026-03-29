@@ -72,7 +72,7 @@ class PlayerController:
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
-        if stamina >= 55:  # 40 erase + 15 paint buffer
+        if stamina >= 45:  # 40 erase + 15 paint buffer
             for dr, dc in DR:
                 nr, nc = my_r + dr, my_c + dc
                 if not valid(nr, nc):
@@ -125,8 +125,6 @@ class PlayerController:
                         priority = 2000 - depth * 20
                     else:
                         priority = 1000 - depth * 20
-                elif cell.owner_parity == self.opp:
-                    priority = 800 - depth * 20  # defend our hill
                 elif cell.owner_parity == 0:
                     priority = 800 - depth * 15
 
