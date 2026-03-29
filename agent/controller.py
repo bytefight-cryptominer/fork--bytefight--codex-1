@@ -394,6 +394,13 @@ class PlayerController:
         if not self.hill_cells:
             return set()
 
+        try:
+            opp_player = board.get_player(-parity)
+        except Exception:
+            opp_player = None
+        unsafe_cells = self._opponent_unsafe_cells(board, parity, opp_player)
+        fallback_dist = len(board.cells) + len(board.cells[0])
+
         # Count controlled hills for DOMINATION prevention
         my_hills = 0
         opp_hills = 0
@@ -414,11 +421,15 @@ class PlayerController:
             opp = sum(1 for r, c in cells if board.cells[r][c].owner_parity == -parity)
             total = len(cells)
             threshold = math.ceil(total * GameConstants.HILL_CONTROL_THRESHOLD)
+            _, approach_cells, goal_dist = self._goal_approach_context(board, cells)
+            my_dist = goal_dist.get((me.loc.r, me.loc.c), fallback_dist)
+            opp_dist = goal_dist.get((opp_r, opp_c), fallback_dist) if opp_r >= 0 else fallback_dist
+            safe_entries = sum(1 for cell in approach_cells if cell not in unsafe_cells)
             if panic:
                 if opp >= my or my < threshold:
-                    min_d_me = min(abs(me.loc.r - r) + abs(me.loc.c - c) for r, c in cells)
                     own_factor = 2.0 * (my - opp) / total if total > 0 else 0
-                    targets.append((min_d_me + own_factor, hid))
+                    own_factor -= min(3, safe_entries) * 0.4
+                    targets.append((my_dist + own_factor, hid))
             else:
                 needs_target = my <= opp or my < threshold
                 # Reinforce narrowly-held hills
@@ -428,13 +439,12 @@ class PlayerController:
                 if not needs_target and my < threshold:
                     needs_target = True
                 if needs_target:
-                    min_d_me = min(abs(me.loc.r - r) + abs(me.loc.c - c) for r, c in cells)
                     own_factor = 2.0 * (my - opp) / total if total > 0 else 0
+                    own_factor -= min(3, safe_entries) * 0.4
                     if opp_r >= 0:
-                        min_d_opp = min(abs(opp_r - r) + abs(opp_c - c) for r, c in cells)
-                        score = min_d_me - 0.5 * min_d_opp + own_factor
+                        score = my_dist - 0.5 * opp_dist + own_factor
                     else:
-                        score = min_d_me + own_factor
+                        score = my_dist + own_factor
                     targets.append((score, hid))
         if not targets:
             return set()
@@ -499,6 +509,127 @@ class PlayerController:
             frontier = next_frontier
         return danger
 
+    def _multi_source_distance(self, board, sources):
+        dist = {}
+        queue = deque()
+        for loc in sources:
+            if board.oob(loc) or board.cells[loc.r][loc.c].is_wall:
+                continue
+            key = (loc.r, loc.c)
+            if key in dist:
+                continue
+            dist[key] = 0
+            queue.append(loc)
+
+        while queue:
+            pos = queue.popleft()
+            cur = dist[(pos.r, pos.c)]
+            for d in Direction.cardinals():
+                nl = pos + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                key = (nl.r, nl.c)
+                if key in dist:
+                    continue
+                dist[key] = cur + 1
+                queue.append(nl)
+
+        return dist
+
+    def _goal_approach_context(self, board, target):
+        goal_cells = {(r, c) for r, c in target}
+        approach_cells = set(goal_cells)
+        for r, c in goal_cells:
+            loc = Location(r, c)
+            for d in Direction.cardinals():
+                nl = loc + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                approach_cells.add((nl.r, nl.c))
+        sources = [Location(r, c) for r, c in approach_cells]
+        return goal_cells, approach_cells, self._multi_source_distance(board, sources)
+
+    def _collect_beacons(self, board, parity):
+        beacons = []
+        rows = len(board.cells)
+        cols = len(board.cells[0])
+        for r in range(rows):
+            for c in range(cols):
+                if board.cells[r][c].beacon_parity == parity:
+                    beacons.append(Location(r, c))
+        return beacons
+
+    def _reachable_cells(self, board, starts, max_steps):
+        seen = set()
+        if max_steps < 0:
+            return seen
+
+        queue = deque()
+        for loc in starts:
+            if board.oob(loc) or board.cells[loc.r][loc.c].is_wall:
+                continue
+            key = (loc.r, loc.c)
+            if key in seen:
+                continue
+            seen.add(key)
+            queue.append((loc, 0))
+
+        while queue:
+            pos, depth = queue.popleft()
+            if depth >= max_steps:
+                continue
+            for d in Direction.cardinals():
+                nl = pos + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                key = (nl.r, nl.c)
+                if key in seen:
+                    continue
+                seen.add(key)
+                queue.append((nl, depth + 1))
+
+        return seen
+
+    def _opponent_unsafe_cells(self, board, parity, opp):
+        if not opp:
+            return set()
+
+        step_cap = 3 if self.map_tier == 'small' else 4
+        steps = min(step_cap, self._max_regular_moves(opp.stamina))
+        danger = self._reachable_cells(board, [opp.loc], steps)
+
+        opp_parity = -parity
+        opp_beacons = self._collect_beacons(board, opp_parity)
+        if not opp_beacons:
+            return danger
+
+        can_teleport = board.cells[opp.loc.r][opp.loc.c].beacon_parity == opp_parity
+        if not can_teleport:
+            for d in Direction.cardinals():
+                nl = opp.loc + d
+                if board.oob(nl):
+                    continue
+                if board.cells[nl.r][nl.c].beacon_parity == opp_parity:
+                    can_teleport = True
+                    break
+
+        if can_teleport:
+            danger.update((loc.r, loc.c) for loc in opp_beacons)
+            teleport_steps = max(1, steps - 1)
+            danger.update(self._reachable_cells(board, opp_beacons, teleport_steps))
+
+        return danger
+
+    def _tile_secure(self, board, loc, parity, rows, cols):
+        cell = board.cells[loc.r][loc.c]
+        if cell.owner_parity != parity:
+            return False
+        if self._count_local(board, loc, parity, rows, cols) >= 7:
+            return True
+        if cell.hill_id and cell.hill_id in board.get_player(parity).controlled_hills:
+            return True
+        return False
+
     def _max_regular_moves(self, stamina_budget):
         moves = 1
         next_cost = GameConstants.EXTRA_MOVE_COST
@@ -562,7 +693,8 @@ class PlayerController:
 
     def _find_move_candidates(self, board, me, parity, rows, cols,
                               opp_r, opp_c, danger, near_opp, target,
-                              effective_safe_dist=None, powerup_dir=None):
+                              effective_safe_dist=None, powerup_dir=None,
+                              goal_cells=None, goal_dist=None, unsafe_cells=None):
         """
         Modified _find_move that returns a list of (score, direction) tuples
         for the top candidates, instead of just the best direction.
@@ -573,18 +705,16 @@ class PlayerController:
 
         dist_to_opp = self._path_dist_to_opp
 
-        # If we have a target hill, use direct BFS to find it first
+        preferred_dir = None
         if target:
-            direct = self._bfs_to_target(board, start, parity, rows, cols,
-                                         opp_r, opp_c, danger, near_opp, target,
-                                         dist_to_opp, effective_safe_dist, me)
-            if direct:
-                # Target hill BFS gives a single strong direction; return it as sole candidate
-                return [(999.0, direct)]
+            preferred_dir = self._bfs_to_target(board, start, parity, rows, cols,
+                                                opp_r, opp_c, danger, near_opp, target,
+                                                dist_to_opp, effective_safe_dist, me)
 
         # SCORED BFS: for each valid initial direction, count unpainted cells within depth
         dirs = list(Direction.cardinals())
         candidates = []
+        start_goal_dist = goal_dist.get((start.r, start.c), 99) if goal_dist else 99
 
         for d in dirs:
             nl = start + d
@@ -602,6 +732,48 @@ class PlayerController:
 
             # BFS from this neighbor up to bfs_depth, distance-weighted scoring
             score = 0
+            if preferred_dir and d == preferred_dir:
+                score += 8.0
+            if goal_dist:
+                step_goal_dist = goal_dist.get((nl.r, nl.c), 99)
+                if step_goal_dist < 99:
+                    score += max(0, 8 - step_goal_dist) * 2.2
+                    score += max(0, start_goal_dist - step_goal_dist) * 4.0
+            if goal_cells and (nl.r, nl.c) in goal_cells:
+                score += 18.0
+
+            post_stamina = me.stamina - GameConstants.EXTRA_MOVE_COST
+            if cell.powerup:
+                post_stamina = min(
+                    me.max_stamina,
+                    post_stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                )
+            immediate_paints = 0
+            goal_paints = 0
+            for d3 in Direction.cardinals():
+                pt = nl + d3
+                if board.oob(pt):
+                    continue
+                if not self._can_paint(board.cells[pt.r][pt.c], parity):
+                    continue
+                immediate_paints += 1
+                if goal_cells and (pt.r, pt.c) in goal_cells:
+                    goal_paints += 1
+                elif (pt.r, pt.c) in self.hill_set and board.cells[pt.r][pt.c].owner_parity != parity:
+                    goal_paints += 1
+            possible_paints = min(
+                immediate_paints,
+                max(0, post_stamina) // GameConstants.PAINT_STAMINA_COST,
+            )
+            post_stamina -= possible_paints * GameConstants.PAINT_STAMINA_COST
+            score += possible_paints * 1.2
+            score += min(goal_paints, possible_paints) * 2.5
+            score += post_stamina * (0.08 if near_opp else 0.03)
+            if unsafe_cells and (nl.r, nl.c) in unsafe_cells:
+                if self._tile_secure(board, nl, parity, rows, cols):
+                    score -= 4.0
+                else:
+                    score -= 18.0 if near_opp else 10.0
             visited = {(start.r, start.c), (nl.r, nl.c)}
             frontier = [(nl.r, nl.c)]
             # Steep weights: heavily favor immediate cells
@@ -690,7 +862,8 @@ class PlayerController:
         return candidates
 
     def _simulate_candidates(self, board, me, parity, candidates, opp,
-                             sim_turns, max_candidates):
+                             sim_turns, max_candidates, goal_cells=None,
+                             goal_dist=None, unsafe_cells=None, near_opp=False):
         """
         For each candidate direction, simulate sim_turns forward using LightBoard
         and return the direction with the best evaluated outcome.
@@ -737,6 +910,15 @@ class PlayerController:
 
             # Evaluate
             ev = lb.evaluate()
+            if goal_dist:
+                end_key = (lb.my_r, lb.my_c)
+                ev += max(0, 8 - goal_dist.get(end_key, 99)) * 8.0
+                if goal_cells and end_key in goal_cells:
+                    ev += 18.0
+            if unsafe_cells and (lb.my_r, lb.my_c) in unsafe_cells:
+                ev -= 20.0
+            end_dist = abs(lb.my_r - lb.opp_r) + abs(lb.my_c - lb.opp_c) if lb.opp_r >= 0 else 99
+            ev += lb.my_stamina * (0.7 if near_opp or end_dist <= 6 else 0.2)
             if ev > best_eval:
                 best_eval = ev
                 best_dir = cand_dir
@@ -866,6 +1048,13 @@ class PlayerController:
         else:
             near_opp = dist_to_opp <= 4 or (approaching and dist_to_opp <= 6)
 
+        target = self._find_target_hill(board, me, player_parity, opp_r, opp_c)
+        if target:
+            goal_cells, _, goal_dist = self._goal_approach_context(board, target)
+        else:
+            goal_cells, goal_dist = None, None
+        unsafe_cells = self._opponent_unsafe_cells(board, player_parity, opp) if opp else None
+
         # === POWERUP COLLECTION ===
         powerup_action = self._check_powerup(board, me, player_parity, danger, near_opp)
         if powerup_action:
@@ -888,13 +1077,14 @@ class PlayerController:
                     return result
 
         # === SIMULATION LAYER: evaluate candidate directions ===
-        target = self._find_target_hill(board, me, player_parity, opp_r, opp_c)
-
         # Get candidate directions with scores
         candidates = self._find_move_candidates(board, me, player_parity, rows, cols,
                                                 opp_r, opp_c, danger, near_opp, target,
                                                 effective_safe_dist=effective_safe_dist,
-                                                powerup_dir=powerup_dir)
+                                                powerup_dir=powerup_dir,
+                                                goal_cells=goal_cells,
+                                                goal_dist=goal_dist,
+                                                unsafe_cells=unsafe_cells)
 
         # Determine simulation budget based on time remaining
         tl = time_left()
@@ -909,7 +1099,11 @@ class PlayerController:
         if sim_turns > 0 and len(candidates) > 1:
             move_dir = self._simulate_candidates(board, me, player_parity,
                                                  candidates, opp,
-                                                 sim_turns, max_candidates)
+                                                 sim_turns, max_candidates,
+                                                 goal_cells=goal_cells,
+                                                 goal_dist=goal_dist,
+                                                 unsafe_cells=unsafe_cells,
+                                                 near_opp=near_opp)
         elif candidates:
             # No simulation budget — use storm's top pick directly
             move_dir = candidates[0][1]
