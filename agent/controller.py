@@ -50,9 +50,7 @@ class PlayerController:
 
         # Adaptive safety based on stamina advantage
         stamina_diff = stamina - opp_stamina
-        if opp_stamina < 20:
-            SAFE_DIST = 1  # opponent is nearly dead, go all-in
-        elif stamina_diff > 30:
+        if stamina_diff > 30:
             SAFE_DIST = 3
         elif stamina_diff < -30:
             SAFE_DIST = 6
@@ -86,16 +84,6 @@ class PlayerController:
                     if nr == opp_r and nc == opp_c:
                         continue
                     # Erase + move + paint combo when possible
-                    if stamina >= 65:
-                        for dr2, dc2 in DR:
-                            off_r, off_c = nr + dr2, nc + dc2
-                            if valid(off_r, off_c) and cell_owner(off_r, off_c) != self.opp:
-                                if mdist(off_r, off_c, opp_r, opp_c) > SAFE_DIST:
-                                    return [
-                                        Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE),
-                                        Action.Move(DIR_MAP[(dr2, dc2)]),
-                                        Action.Paint(Location(nr, nc))
-                                    ]
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
         # --- BFS ---
