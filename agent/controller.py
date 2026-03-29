@@ -296,7 +296,7 @@ class LightBoard:
 
 class PlayerController:
     """
-    mcts_v6_d: Default safety, deeper BFS=8 on large maps
+    mcts_v6_f: Heavier simulation: always 5 turns ahead, 4 candidates
     Uses a LightBoard to simulate 3-5 turns ahead for top candidate
     directions, picking the one with best territorial outcome.
     """
@@ -690,7 +690,7 @@ class PlayerController:
                 wall_count = sum(1 for r in range(rows) for c in range(cols) if board.cells[r][c].is_wall)
                 wall_ratio = wall_count / cells
                 self.safe_dist = 4
-                self.bfs_depth = 8
+                self.bfs_depth = 6
         self._discover_hills(board, rows, cols)
         if self.turn == 1:
             self.center_r = rows // 2
@@ -799,15 +799,9 @@ class PlayerController:
 
         # Determine simulation budget based on time remaining
         tl = time_left()
-        if tl > 120:
+        if tl > 10:
             sim_turns = 5
             max_candidates = 4
-        elif tl > 60:
-            sim_turns = 3
-            max_candidates = 3
-        elif tl > 20:
-            sim_turns = 2
-            max_candidates = 2
         else:
             sim_turns = 0
             max_candidates = 0
