@@ -758,7 +758,19 @@ class PlayerController:
         goal_cells, _, goal_dist = self._goal_approach_context(board, target)
         start_key = (me.loc.r, me.loc.c)
         start_dist = goal_dist.get(start_key, 99)
-        if start_dist > (3 if near_opp else 2):
+        if start_dist > 1:
+            return None
+
+        total = len(goal_cells)
+        threshold = math.ceil(total * GameConstants.HILL_CONTROL_THRESHOLD)
+        my_goal = sum(1 for r, c in goal_cells if board.cells[r][c].owner_parity == parity)
+        opp_goal = sum(1 for r, c in goal_cells if board.cells[r][c].owner_parity == -parity)
+        swingy = (
+            abs(my_goal - threshold) <= 1
+            or abs(opp_goal - threshold) <= 1
+            or abs(my_goal - opp_goal) <= 1
+        )
+        if not swingy:
             return None
 
         unsafe_cells = self._opponent_unsafe_cells(board, parity, opp)
@@ -781,8 +793,8 @@ class PlayerController:
         best_actions = None
         best_score = -999999.0
         beam = [(base_score if base_score is not None else -999999.0, board.get_copy(), [])]
-        max_depth = 2 if near_opp or start_dist <= 1 else 3
-        beam_width = 3 if near_opp else 4
+        max_depth = 2
+        beam_width = 3
 
         for _ in range(max_depth):
             if time_left() < 12:
@@ -812,7 +824,7 @@ class PlayerController:
             next_beam.sort(key=lambda x: x[0], reverse=True)
             beam = next_beam[:beam_width]
 
-        if best_actions and best_score > (base_score if base_score is not None else 0) + 6.0:
+        if best_actions and best_score > (base_score if base_score is not None else 0) + 10.0:
             return best_actions
         return None
 
