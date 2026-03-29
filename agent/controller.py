@@ -7,8 +7,7 @@ from game import *
 
 class PlayerController:
     """
-    v117: v113 + forward-biased paint tiebreak.
-    Small bonus (+15) for painting the cell in the movement direction.
+    v121: v117 + increased paintable tiebreak (*3 instead of *2).
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -180,7 +179,7 @@ class PlayerController:
                     priority = 1100 - depth * 20  # higher enemy territory priority
 
             if priority > -900:
-                priority += count_paintable(r, c) * 2
+                priority += count_paintable(r, c) * 3
 
             if priority > best_priority:
                 best_priority = priority
