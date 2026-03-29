@@ -46,6 +46,11 @@ class PlayerController:
         def cell_owner(r, c):
             return board.cells[r][c].owner_parity
 
+        total_hills = len(board.hills)
+        domination_goal = (3 * total_hills + 3) // 4 if total_hills else 0
+        my_hills = len(me.controlled_hills)
+        opp_hills = len(opp.controlled_hills)
+
         # Adaptive safety based on stamina advantage
         stamina_diff = stamina - opp_stamina
         if stamina_diff > 30:
@@ -54,6 +59,17 @@ class PlayerController:
             SAFE_DIST = 6
         else:
             SAFE_DIST = 5
+
+        hill_meta = {}
+        for hill_id, hill in board.hills.items():
+            threshold = (len(hill.cells) + 1) // 2
+            if player_parity > 0:
+                my_cells = hill.control_positive
+                opp_cells = -hill.control_negative
+            else:
+                my_cells = -hill.control_negative
+                opp_cells = hill.control_positive
+            hill_meta[hill_id] = (threshold, my_cells, opp_cells)
 
         def count_paintable(r, c):
             count = 0
@@ -67,6 +83,30 @@ class PlayerController:
                 elif o == player_parity and abs(board.cells[nr][nc].paint_value) < GameConstants.MAX_PAINT_VALUE:
                     count += 1
             return count
+
+        def hill_static_terms(hill_id):
+            threshold, my_cells, opp_cells = hill_meta[hill_id]
+            my_needed = max(0, threshold - my_cells)
+            opp_needed = max(0, threshold - opp_cells)
+            small_hill_bonus = max(0, 5 - threshold) * 110
+            capture_bonus = max(0, 4 - my_needed) * 120
+            disrupt_bonus = max(0, 4 - opp_needed) * 70
+            thin_margin = my_cells - opp_cells
+            return small_hill_bonus, capture_bonus, disrupt_bonus, thin_margin
+
+        def hill_race_bonus(r, c, depth):
+            race_margin = mdist(r, c, opp_r, opp_c) - depth
+            return max(-4, min(4, race_margin)) * 45
+
+        def hill_paint_bonus(hill_id):
+            threshold, my_cells, opp_cells = hill_meta[hill_id]
+            my_needed = max(0, threshold - my_cells)
+            defend_bonus = 0
+            if domination_goal and opp_hills >= domination_goal - 1 and board.hills[hill_id].controller_parity == player_parity:
+                defend_bonus += 140
+            if my_cells - opp_cells <= 1 and my_cells <= threshold + 1:
+                defend_bonus += 80
+            return max(0, 5 - threshold) * 25 + max(0, 3 - my_needed) * 45 + defend_bonus
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
@@ -154,18 +194,27 @@ class PlayerController:
 
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
+                small_hill_bonus, capture_bonus, disrupt_bonus, thin_margin = hill_static_terms(cell.hill_id)
+                race_bonus = hill_race_bonus(r, c, depth)
+                dom_attack_bonus = 1000 if domination_goal and hill.controller_parity != player_parity and my_hills + 1 >= domination_goal else 0
+                dom_defend_bonus = 900 if domination_goal and hill.controller_parity == self.opp and opp_hills >= domination_goal - 1 else 0
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 - depth * 20
+                        priority = 2500 - depth * 20 + small_hill_bonus + capture_bonus + disrupt_bonus + race_bonus + dom_attack_bonus + dom_defend_bonus
                     else:
-                        priority = 1200 - depth * 20
+                        priority = 1200 - depth * 20 + small_hill_bonus + capture_bonus + race_bonus // 2 + dom_attack_bonus + dom_defend_bonus
                 elif hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 - depth * 20
+                        priority = 2000 - depth * 20 + small_hill_bonus + capture_bonus + race_bonus + dom_attack_bonus
                     else:
-                        priority = 1000 - depth * 20
+                        priority = 1000 - depth * 20 + small_hill_bonus + max(0, capture_bonus - 120) + race_bonus // 2 + dom_attack_bonus
                 elif cell.owner_parity == 0:
-                    priority = 800 - depth * 15
+                    defend_bonus = 0
+                    if domination_goal and opp_hills >= domination_goal - 1:
+                        defend_bonus += 600
+                    if thin_margin <= 1:
+                        defend_bonus += 180
+                    priority = 800 - depth * 15 + small_hill_bonus // 2 + defend_bonus
 
             if cell.powerup:
                 # Dynamic depth penalty: when low stamina, only chase NEARBY powerups
@@ -240,9 +289,9 @@ class PlayerController:
 
             if pcell.owner_parity == player_parity:
                 if pcell.hill_id and pcell.hill_id != 0 and abs(pcell.paint_value) < GameConstants.MAX_PAINT_VALUE:
-                    paint_candidates.append((80, pr, pc))
+                    paint_candidates.append((80 + hill_paint_bonus(pcell.hill_id), pr, pc))
                 continue
-            pscore = 200 if (pcell.hill_id and pcell.hill_id != 0) else 100
+            pscore = 200 + hill_paint_bonus(pcell.hill_id) if (pcell.hill_id and pcell.hill_id != 0) else 100
             # Forward bias: prefer painting in the movement direction
             if (pr - new_r, pc - new_c) == (ddr, ddc):
                 pscore += 15
