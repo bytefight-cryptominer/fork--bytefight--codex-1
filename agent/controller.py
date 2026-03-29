@@ -117,6 +117,43 @@ class PlayerController:
                     queue.append((nr, nc, depth + 1))
             return dist
 
+        def reachable_with_powerups(start_r, start_c, start_stamina, max_depth):
+            reachable = set()
+
+            def dfs(r, c, moves_taken, stamina_left, depth_left, visited):
+                for dr, dc in DR:
+                    nr, nc = r + dr, c + dc
+                    if not valid(nr, nc) or (nr, nc) in visited:
+                        continue
+
+                    move_cost = GameConstants.EXTRA_MOVE_COST * moves_taken
+                    if stamina_left < move_cost:
+                        continue
+
+                    next_stamina = stamina_left - move_cost
+                    reachable.add((nr, nc))
+
+                    if depth_left == 1:
+                        continue
+
+                    if board.cells[nr][nc].powerup:
+                        next_stamina = min(
+                            opp.max_stamina,
+                            next_stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                        )
+
+                    dfs(
+                        nr,
+                        nc,
+                        moves_taken + 1,
+                        next_stamina,
+                        depth_left - 1,
+                        visited | {(nr, nc)},
+                    )
+
+            dfs(start_r, start_c, 0, start_stamina, max_depth, {(start_r, start_c)})
+            return reachable
+
         def owner_after_regular_move(r, c):
             paint_value = board.cells[r][c].paint_value
             if paint_value == 0:
@@ -130,7 +167,7 @@ class PlayerController:
 
         def unsafe_regular_landing(r, c):
             return (
-                opp_dist.get((r, c)) is not None and
+                (r, c) in opp_reachable and
                 owner_after_regular_move(r, c) != player_parity
             )
 
@@ -158,7 +195,12 @@ class PlayerController:
                 opp_stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
             )
         opp_kill_moves = max_regular_moves(opp_effective_stamina)
-        opp_dist = shortest_distances(opp_r, opp_c, opp_kill_moves)
+        opp_reachable = reachable_with_powerups(
+            opp_r,
+            opp_c,
+            opp_effective_stamina,
+            max(opp_kill_moves, 8),
+        )
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
