@@ -55,7 +55,7 @@ class PlayerController:
         elif stamina_diff < -30:
             SAFE_DIST = 6
         else:
-            SAFE_DIST = 5
+            SAFE_DIST = 4
 
         def count_paintable(r, c):
             count = 0
@@ -218,4 +218,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return ""
+        return "v74"
