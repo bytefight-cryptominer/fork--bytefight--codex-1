@@ -310,7 +310,7 @@ class LightBoard:
     def evaluate(self):
         """
         Score the position from 'my' perspective.
-        Territory diff + capture-aware hill scoring.
+        Territory diff + capture-aware hill scoring + domination terminal bonus.
         """
         score = (self.my_territory - self.opp_territory) * 2.0
 
@@ -327,14 +327,27 @@ class LightBoard:
             elif p == -1:
                 hill_control[hid][1] += 1
 
+        my_captured_hills = 0
+        opp_captured_hills = 0
         for hid, (my, opp, total) in hill_control.items():
             threshold = (total + 1) // 2
             if my >= threshold and my > opp:
+                my_captured_hills += 1
                 score += 300  # captured hill: +40 max stamina equivalent
             elif opp >= threshold and opp > my:
+                opp_captured_hills += 1
                 score -= 300
             # Individual cell control on uncaptured hills
             score += (my - opp) * 60
+
+        if hill_control:
+            domination_need = math.ceil(
+                len(hill_control) * GameConstants.DOMINATION_WIN_THRESHOLD
+            )
+            if my_captured_hills >= domination_need:
+                score += 5000
+            elif opp_captured_hills >= domination_need:
+                score -= 5000
 
         return score
 
