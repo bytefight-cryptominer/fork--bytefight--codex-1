@@ -7,7 +7,7 @@ from game import *
 
 class PlayerController:
     """
-    v133: v126 + smarter erase exit direction (prefer more paintable neighbors).
+    v204: v133 + 2-step collision kill when opponent at distance 2 on favorable cell.
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -67,6 +67,21 @@ class PlayerController:
                 elif o == player_parity and abs(board.cells[nr][nc].paint_value) < GameConstants.MAX_PAINT_VALUE:
                     count += 1
             return count
+
+        # --- 2-step collision kill ---
+        # If opponent is exactly 2 steps away and their cell is not opponent-owned, kill them
+        opp_dist = mdist(my_r, my_c, opp_r, opp_c)
+        if opp_dist == 2 and stamina >= 10 and cell_owner(opp_r, opp_c) != self.opp:
+            for dr1, dc1 in DR:
+                mid_r, mid_c = my_r + dr1, my_c + dc1
+                if not valid(mid_r, mid_c):
+                    continue
+                if mid_r == opp_r and mid_c == opp_c:
+                    continue  # that's 1-step, handled by BFS collision pursuit
+                for dr2, dc2 in DR:
+                    if mid_r + dr2 == opp_r and mid_c + dc2 == opp_c:
+                        return [Action.Move(DIR_MAP[(dr1, dc1)]),
+                                Action.Move(DIR_MAP[(dr2, dc2)])]
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
