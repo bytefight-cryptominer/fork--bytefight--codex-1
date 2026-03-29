@@ -1214,8 +1214,11 @@ class PlayerController:
             elif cell.owner_parity == 0:
                 normal.append(t)
             # NO reinforcement painting - don't waste stamina on owned cells
-        # Deterministic ordering: hills first (sorted by distance to center for consistency)
-        return hill + normal
+        # When we are actively working a target hill, keep the paint budget
+        # on hill cells instead of leaking stamina into nearby neutral paint.
+        if hill:
+            return hill
+        return normal
 
     def _paint_priority(self, loc, cell, parity):
         is_hill = (loc.r, loc.c) in self.hill_set
