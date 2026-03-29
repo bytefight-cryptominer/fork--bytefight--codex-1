@@ -337,4 +337,4 @@ class PlayerController:
         return [Action.Move(Direction.UP)]
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return ""
+        return "v88c"
