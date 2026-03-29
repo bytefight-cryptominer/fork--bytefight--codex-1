@@ -15,8 +15,6 @@ class PlayerController:
     def __init__(self, player_parity: int, time_left: Callable):
         self.parity = player_parity
         self.opp = -player_parity
-        self.prev_opp_r = None
-        self.prev_opp_c = None
 
     def bid(self, board: Board, player_parity: int, time_left: Callable) -> int:
         return 0
@@ -158,15 +156,6 @@ class PlayerController:
 
             if cell.owner_parity == 0 and priority < -900:
                 priority = 900 - depth * 20
-                # Small bonus for expanding away from opponent's direction of travel
-                if self.prev_opp_r is not None:
-                    opp_dr = opp_r - self.prev_opp_r
-                    opp_dc = opp_c - self.prev_opp_c
-                    # Cells in opposite direction of opponent movement get bonus
-                    if opp_dr != 0 or opp_dc != 0:
-                        dot = (r - my_r) * (-opp_dr) + (c - my_c) * (-opp_dc)
-                        if dot > 0:
-                            priority += 15  # slight preference for divergent expansion
 
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
@@ -252,9 +241,7 @@ class PlayerController:
             actions.append(Action.Paint(Location(pr, pc)))
             paint_spent += GameConstants.PAINT_STAMINA_COST
 
-        self.prev_opp_r = opp_r
-        self.prev_opp_c = opp_c
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return ""
+        return "v92e"
