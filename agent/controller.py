@@ -7,9 +7,9 @@ from game import *
 
 class PlayerController:
     """
-    v10: Comprehensive territory-control agent.
-    Combines: adaptive safety, collision pursuit, powerup collection,
-    late-game conservation.
+    v113: Enhanced erase combo with intermediate hill paints.
+    Base: v106. Change: after erasing opponent hill cell, paint
+    additional hill cells from erased position before moving away.
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -89,11 +89,29 @@ class PlayerController:
                             off_r, off_c = nr + dr2, nc + dc2
                             if valid(off_r, off_c) and cell_owner(off_r, off_c) != self.opp:
                                 if mdist(off_r, off_c, opp_r, opp_c) > SAFE_DIST:
-                                    return [
-                                        Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE),
-                                        Action.Move(DIR_MAP[(dr2, dc2)]),
-                                        Action.Paint(Location(nr, nc))
-                                    ]
+                                    combo = [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
+                                    # Add intermediate paints from erased position
+                                    # Paint adjacent hill cells before moving away
+                                    reserve = 25 if board.turn_count > 1400 else 10
+                                    extra_budget = stamina - 65 - reserve  # 65 = base combo cost
+                                    hill_id = ecell.hill_id
+                                    for dr3, dc3 in DR:
+                                        if extra_budget < GameConstants.PAINT_STAMINA_COST:
+                                            break
+                                        pr, pc = nr + dr3, nc + dc3
+                                        if not valid(pr, pc) or (pr == off_r and pc == off_c):
+                                            continue
+                                        pcell = board.cells[pr][pc]
+                                        if pcell.is_wall:
+                                            continue
+                                        # Only paint neutral cells on same hill
+                                        if (pcell.hill_id == hill_id and
+                                            pcell.owner_parity == 0):
+                                            combo.append(Action.Paint(Location(pr, pc)))
+                                            extra_budget -= GameConstants.PAINT_STAMINA_COST
+                                    combo.append(Action.Move(DIR_MAP[(dr2, dc2)]))
+                                    combo.append(Action.Paint(Location(nr, nc)))
+                                    return combo
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
         # --- BFS ---
