@@ -211,6 +211,8 @@ class PlayerController:
                             combo.append(Action.Move(DIR_MAP[(dr2, dc2)]))
                             combo.append(Action.Paint(Location(nr, nc)))
                             return combo
+                    if unsafe_regular_landing(nr, nc):
+                        continue
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
         # --- BFS ---
