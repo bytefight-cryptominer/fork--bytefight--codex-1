@@ -222,14 +222,7 @@ class PlayerController:
             actions.append(Action.Paint(Location(pr, pc)))
             paint_spent += GameConstants.PAINT_STAMINA_COST
 
-        # Double-move when no paintable cells (stuck in painted territory)
-        if not paint_candidates and stamina >= 20:
-            nr2, nc2 = new_r + ddr, new_c + ddc
-            if valid(nr2, nc2) and mdist(nr2, nc2, opp_r, opp_c) > 0:
-                if not (cell_owner(nr2, nc2) == self.opp and mdist(nr2, nc2, opp_r, opp_c) <= SAFE_DIST):
-                    actions.append(Action.Move(best_first_dir))
-
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return ""
+        return "v81d"
