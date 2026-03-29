@@ -96,12 +96,19 @@ class PlayerController:
                                     ]
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
-        # --- Domination detection ---
-        import math
-        total_hills = sum(1 for hid in board.hills if hid != 0)
-        my_hills = len(me.controlled_hills)
-        needed_for_dom = math.ceil(total_hills * GameConstants.DOMINATION_WIN_THRESHOLD) if total_hills > 0 else 999
-        domination_rush = (my_hills >= needed_for_dom - 1 and total_hills > 0 and my_hills < needed_for_dom)
+        # --- BFS from opponent to compute their distances ---
+        opp_dist = {}
+        opp_q = deque([(opp_r, opp_c, 0)])
+        opp_dist[(opp_r, opp_c)] = 0
+        while opp_q:
+            or2, oc2, od = opp_q.popleft()
+            if od >= 20:
+                break
+            for dr, dc in DR:
+                onr, onc = or2 + dr, oc2 + dc
+                if (onr, onc) not in opp_dist and valid(onr, onc):
+                    opp_dist[(onr, onc)] = od + 1
+                    opp_q.append((onr, onc, od + 1))
 
         # --- BFS ---
         best_first_dir = None
@@ -139,18 +146,19 @@ class PlayerController:
 
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
-                # Domination rush: EXTREME priority for uncaptured hills when 1 away from winning
-                dom_bonus = 2000 if (domination_rush and hill.controller_parity != player_parity) else 0
+                # Contest bonus: if opponent can also reach this hill fast, it's more valuable
+                od = opp_dist.get((r, c), 99)
+                contest = 200 if od <= depth + 3 else 0  # opponent is close too
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 + dom_bonus - depth * 20
+                        priority = 2500 + contest - depth * 20
                     else:
                         priority = 1200 - depth * 20
                 elif hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 + dom_bonus - depth * 20
+                        priority = 2000 + contest - depth * 20
                     else:
-                        priority = 1000 + dom_bonus - depth * 20
+                        priority = 1000 - depth * 20
                 elif cell.owner_parity == 0:
                     priority = 800 - depth * 15
 
