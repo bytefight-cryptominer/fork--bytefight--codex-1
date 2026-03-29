@@ -7,7 +7,7 @@ from game import *
 
 class PlayerController:
     """
-    v133: v126 + smarter erase exit direction (prefer more paintable neighbors).
+    v134: v133 + bounded shortest-path same-turn collision kills.
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -68,20 +68,56 @@ class PlayerController:
                     count += 1
             return count
 
-        # Rare tactical exception: spend the second move only for an immediate kill.
-        if stamina >= GameConstants.EXTRA_MOVE_COST and cell_owner(opp_r, opp_c) != self.opp:
-            for dr, dc in DR:
-                nr, nc = my_r + dr, my_c + dc
-                if not valid(nr, nc):
+        def max_regular_moves(stamina_budget):
+            moves = 1
+            next_cost = GameConstants.EXTRA_MOVE_COST
+            while stamina_budget >= next_cost:
+                stamina_budget -= next_cost
+                moves += 1
+                next_cost += GameConstants.EXTRA_MOVE_COST
+            return moves
+
+        def shortest_path_dirs(goal_r, goal_c, max_depth):
+            queue = deque([(my_r, my_c, 0)])
+            parents = {(my_r, my_c): None}
+
+            while queue:
+                r, c, depth = queue.popleft()
+                if depth >= max_depth:
                     continue
-                if mdist(nr, nc, opp_r, opp_c) != 1:
-                    continue
-                kill_dir = (opp_r - nr, opp_c - nc)
-                if kill_dir in DIR_MAP:
-                    return [
-                        Action.Move(DIR_MAP[(dr, dc)]),
-                        Action.Move(DIR_MAP[kill_dir]),
-                    ]
+                for dr, dc in DR:
+                    nr, nc = r + dr, c + dc
+                    if not valid(nr, nc) or (nr, nc) in parents:
+                        continue
+                    parents[(nr, nc)] = ((r, c), DIR_MAP[(dr, dc)])
+                    if nr == goal_r and nc == goal_c:
+                        path = []
+                        cur = (nr, nc)
+                        while parents[cur] is not None:
+                            prev, move_dir = parents[cur]
+                            path.append(move_dir)
+                            cur = prev
+                        path.reverse()
+                        return path
+                    queue.append((nr, nc, depth + 1))
+            return None
+
+        # If we can reach the opponent's current square this turn on a neutral/friendly cell,
+        # spend the turn on the immediate win instead of saving stamina.
+        effective_stamina = stamina
+        if board.cells[my_r][my_c].powerup:
+            effective_stamina = min(
+                me.max_stamina,
+                stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+            )
+        if cell_owner(opp_r, opp_c) != self.opp:
+            kill_path = shortest_path_dirs(
+                opp_r,
+                opp_c,
+                max_regular_moves(effective_stamina),
+            )
+            if kill_path:
+                return [Action.Move(move_dir) for move_dir in kill_path]
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
