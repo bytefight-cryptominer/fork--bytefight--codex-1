@@ -125,12 +125,8 @@ class PlayerController:
                         priority = 2000 - depth * 20
                     else:
                         priority = 1000 - depth * 20
-                else:
-                    # Our hill - defend it
-                    if cell.owner_parity == self.opp:
-                        priority = 1200 - depth * 20  # defend: opponent encroaching
-                    elif cell.owner_parity == 0:
-                        priority = 800 - depth * 15
+                elif cell.owner_parity == 0:
+                    priority = 800 - depth * 15
 
             if cell.powerup:
                 pup_val = 1500 - depth * 25
