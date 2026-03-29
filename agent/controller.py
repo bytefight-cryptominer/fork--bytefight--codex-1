@@ -1,14 +1,13 @@
-import math
-from collections import deque
 from collections.abc import Callable, Iterable
-from typing import List, Union
+from collections import deque
+from typing import Union, List
 
 from game import *
 
 
 class PlayerController:
     """
-    v134: v133 + exact hill-race scoring from hill control counts and distance margins.
+    v133: v126 + smarter erase exit direction (prefer more paintable neighbors).
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -33,18 +32,8 @@ class PlayerController:
         opp_stamina = opp.stamina
 
         drs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-        dir_map = {
-            (-1, 0): Direction.UP,
-            (1, 0): Direction.DOWN,
-            (0, -1): Direction.LEFT,
-            (0, 1): Direction.RIGHT,
-        }
-        inv_dir = {
-            Direction.UP: (-1, 0),
-            Direction.DOWN: (1, 0),
-            Direction.LEFT: (0, -1),
-            Direction.RIGHT: (0, 1),
-        }
+        dir_map = {(-1, 0): Direction.UP, (1, 0): Direction.DOWN, (0, -1): Direction.LEFT, (0, 1): Direction.RIGHT}
+        inv_dir = {Direction.UP: (-1, 0), Direction.DOWN: (1, 0), Direction.LEFT: (0, -1), Direction.RIGHT: (0, 1)}
 
         def valid(r, c):
             return 0 <= r < rows and 0 <= c < cols and not board.cells[r][c].is_wall
@@ -55,14 +44,7 @@ class PlayerController:
         def cell_owner(r, c):
             return board.cells[r][c].owner_parity
 
-        total_hills = len(board.hills)
-        domination_goal = (3 * total_hills + 3) // 4 if total_hills else 0
-        my_hills = len(me.controlled_hills)
-        opp_hills = len(opp.controlled_hills)
-        domination_attack = domination_goal > 0 and my_hills + 1 >= domination_goal
-        domination_defend = domination_goal > 0 and opp_hills + 1 >= domination_goal
-
-        # Adaptive safety based on stamina advantage.
+        # Adaptive safety based on stamina advantage
         stamina_diff = stamina - opp_stamina
         if stamina_diff > 30:
             safe_dist = 3
@@ -84,36 +66,7 @@ class PlayerController:
                     count += 1
             return count
 
-        def hill_control_counts(hill):
-            if player_parity > 0:
-                my_control = hill.control_positive
-                opp_control = -hill.control_negative
-            else:
-                my_control = -hill.control_negative
-                opp_control = hill.control_positive
-            threshold = math.ceil(len(hill.cells) * GameConstants.HILL_CONTROL_THRESHOLD)
-            return my_control, opp_control, threshold
-
-        def hill_race_bonus(hill, depth, r, c):
-            my_control, opp_control, threshold = hill_control_counts(hill)
-            my_need = max(0, threshold - my_control)
-            opp_need = max(0, threshold - opp_control)
-            dist_margin = mdist(opp_r, opp_c, r, c) - depth
-            count_bonus = (opp_need - my_need) * 28
-            dist_bonus = max(-120, min(180, dist_margin * 26))
-
-            bonus = count_bonus + dist_bonus
-            if domination_attack and hill.controller_parity != player_parity:
-                bonus += 140
-            if domination_defend and hill.controller_parity == self.opp:
-                bonus += 180
-            if my_need <= 1 and hill.controller_parity != player_parity:
-                bonus += 120
-            if opp_need <= 1 and hill.controller_parity == self.opp:
-                bonus += 120
-            return bonus
-
-        # Erase opponent-painted hill cells.
+        # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours).
         if stamina >= 50:
             for dr, dc in drs:
                 nr, nc = my_r + dr, my_c + dc
@@ -130,13 +83,12 @@ class PlayerController:
                         continue
                     if stamina >= 65:
                         best_exit = None
-                        best_exit_score = -1e9
-                        hill = board.hills[ecell.hill_id]
+                        best_exit_score = -1
                         for dr2, dc2 in drs:
                             off_r, off_c = nr + dr2, nc + dc2
                             if valid(off_r, off_c) and cell_owner(off_r, off_c) != self.opp:
                                 if mdist(off_r, off_c, opp_r, opp_c) > safe_dist:
-                                    score = count_paintable(off_r, off_c) * 2 + hill_race_bonus(hill, 2, off_r, off_c)
+                                    score = count_paintable(off_r, off_c)
                                     if score > best_exit_score:
                                         best_exit_score = score
                                         best_exit = (dr2, dc2, off_r, off_c)
@@ -165,6 +117,7 @@ class PlayerController:
 
         best_first_dir = None
         best_priority = -999999
+
         visited = {(my_r, my_c)}
         queue = deque()
 
@@ -196,19 +149,18 @@ class PlayerController:
 
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
-                race_bonus = hill_race_bonus(hill, depth, r, c)
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 - depth * 20 + race_bonus
+                        priority = 2500 - depth * 20
                     else:
-                        priority = 1200 - depth * 20 + race_bonus
+                        priority = 1200 - depth * 20
                 elif hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 - depth * 20 + race_bonus
+                        priority = 2000 - depth * 20
                     else:
-                        priority = 1000 - depth * 20 + race_bonus
+                        priority = 1000 - depth * 20
                 elif cell.owner_parity == 0:
-                    priority = 800 - depth * 15 + race_bonus
+                    priority = 800 - depth * 15
 
             if cell.powerup:
                 stamina_ratio = max(0, min(1, stamina / 100))
@@ -251,6 +203,7 @@ class PlayerController:
                 return Action.Move(Direction.UP)
 
         actions: List = [Action.Move(best_first_dir)]
+
         ddr, ddc = inv_dir[best_first_dir]
         new_r, new_c = my_r + ddr, my_c + ddc
         if not valid(new_r, new_c):
@@ -268,20 +221,16 @@ class PlayerController:
             pcell = board.cells[pr][pc]
             if pcell.is_wall or pcell.beacon_parity == player_parity:
                 continue
-            if pcell.owner_parity not in (player_parity, 0):
+            if pcell.owner_parity != player_parity and pcell.owner_parity != 0:
                 continue
             if pcell.owner_parity == player_parity and abs(pcell.paint_value) >= GameConstants.MAX_PAINT_VALUE:
                 continue
 
             if pcell.owner_parity == player_parity:
                 if pcell.hill_id and pcell.hill_id != 0 and abs(pcell.paint_value) < GameConstants.MAX_PAINT_VALUE:
-                    pscore = 80 + hill_race_bonus(board.hills[pcell.hill_id], 1, pr, pc) // 8
-                    paint_candidates.append((pscore, pr, pc))
+                    paint_candidates.append((80, pr, pc))
                 continue
-
             pscore = 200 if (pcell.hill_id and pcell.hill_id != 0) else 100
-            if pcell.hill_id and pcell.hill_id != 0:
-                pscore += hill_race_bonus(board.hills[pcell.hill_id], 1, pr, pc) // 6
             if (pr - new_r, pc - new_c) == (ddr, ddc):
                 pscore += 15
             paint_candidates.append((pscore, pr, pc))
