@@ -499,6 +499,117 @@ class PlayerController:
             frontier = next_frontier
         return danger
 
+    def _multi_source_distance(self, board, sources):
+        dist = {}
+        queue = deque()
+        for loc in sources:
+            if board.oob(loc) or board.cells[loc.r][loc.c].is_wall:
+                continue
+            key = (loc.r, loc.c)
+            if key in dist:
+                continue
+            dist[key] = 0
+            queue.append(loc)
+
+        while queue:
+            pos = queue.popleft()
+            cur = dist[(pos.r, pos.c)]
+            for d in Direction.cardinals():
+                nl = pos + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                key = (nl.r, nl.c)
+                if key in dist:
+                    continue
+                dist[key] = cur + 1
+                queue.append(nl)
+
+        return dist
+
+    def _goal_approach_context(self, board, target):
+        goal_cells = {(r, c) for r, c in target}
+        approach_cells = set(goal_cells)
+        for r, c in goal_cells:
+            loc = Location(r, c)
+            for d in Direction.cardinals():
+                nl = loc + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                approach_cells.add((nl.r, nl.c))
+        sources = [Location(r, c) for r, c in approach_cells]
+        return approach_cells, self._multi_source_distance(board, sources)
+
+    def _collect_beacons(self, board, parity):
+        beacons = []
+        rows = len(board.cells)
+        cols = len(board.cells[0])
+        for r in range(rows):
+            for c in range(cols):
+                if board.cells[r][c].beacon_parity == parity:
+                    beacons.append(Location(r, c))
+        return beacons
+
+    def _reachable_cells(self, board, starts, max_steps):
+        seen = set()
+        if max_steps < 0:
+            return seen
+
+        queue = deque()
+        for loc in starts:
+            if board.oob(loc) or board.cells[loc.r][loc.c].is_wall:
+                continue
+            key = (loc.r, loc.c)
+            if key in seen:
+                continue
+            seen.add(key)
+            queue.append((loc, 0))
+
+        while queue:
+            pos, depth = queue.popleft()
+            if depth >= max_steps:
+                continue
+            for d in Direction.cardinals():
+                nl = pos + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                key = (nl.r, nl.c)
+                if key in seen:
+                    continue
+                seen.add(key)
+                queue.append((nl, depth + 1))
+
+        return seen
+
+    def _opponent_unsafe_cells(self, board, parity, opp):
+        if not opp:
+            return set()
+
+        step_cap = 3 if self.map_tier == 'small' else 4
+        steps = min(step_cap, self._max_regular_moves(opp.stamina))
+        danger = self._reachable_cells(board, [opp.loc], steps)
+
+        opp_parity = -parity
+        opp_beacons = self._collect_beacons(board, opp_parity)
+        if not opp_beacons:
+            return danger
+
+        can_teleport = board.cells[opp.loc.r][opp.loc.c].beacon_parity == opp_parity
+        if not can_teleport:
+            for d in Direction.cardinals():
+                nl = opp.loc + d
+                if board.oob(nl):
+                    continue
+                if board.cells[nl.r][nl.c].beacon_parity == opp_parity:
+                    can_teleport = True
+                    break
+
+        if can_teleport:
+            danger.update((loc.r, loc.c) for loc in opp_beacons)
+            teleport_steps = max(1, steps - 1)
+            danger.update(self._reachable_cells(board, opp_beacons, teleport_steps))
+
+        return danger
+
     def _max_regular_moves(self, stamina_budget):
         moves = 1
         next_cost = GameConstants.EXTRA_MOVE_COST
@@ -579,8 +690,27 @@ class PlayerController:
                                          opp_r, opp_c, danger, near_opp, target,
                                          dist_to_opp, effective_safe_dist, me)
             if direct:
-                # Target hill BFS gives a single strong direction; return it as sole candidate
-                return [(999.0, direct)]
+                approach_cells, goal_dist = self._goal_approach_context(board, target)
+                unsafe_cells = self._opponent_unsafe_cells(
+                    board,
+                    parity,
+                    board.get_player(-parity) if opp_r >= 0 else None,
+                )
+                my_dist = goal_dist.get((start.r, start.c), rows + cols)
+                opp_dist = goal_dist.get((opp_r, opp_c), rows + cols) if opp_r >= 0 else rows + cols
+                safe_entries = sum(1 for cell in approach_cells if cell not in unsafe_cells)
+                commit = False
+                if my_dist <= 2:
+                    commit = True
+                elif my_dist <= 4 and opp_dist >= my_dist + 1:
+                    commit = True
+                elif my_dist <= 5 and safe_entries >= 3 and opp_dist >= my_dist:
+                    commit = True
+                elif near_opp and my_dist <= 3 and safe_entries >= 2:
+                    commit = True
+                if commit:
+                    # Keep the strong override only when the approach race looks favorable.
+                    return [(999.0, direct)]
 
         # SCORED BFS: for each valid initial direction, count unpainted cells within depth
         dirs = list(Direction.cardinals())
