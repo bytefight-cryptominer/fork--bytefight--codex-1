@@ -146,7 +146,10 @@ class PlayerController:
                     priority = 800 - depth * 15
 
             if cell.powerup:
-                pup_val = 1500 - depth * 25
+                # Dynamic depth penalty: when low stamina, only chase NEARBY powerups
+                stamina_ratio = max(0, min(1, stamina / 100))
+                depth_penalty = 25 if stamina > 50 else int(25 + 75 * (1 - stamina_ratio))
+                pup_val = 1500 - depth * depth_penalty
                 if stamina < 60:
                     pup_val += 300
                 priority = max(priority, pup_val)
@@ -157,7 +160,7 @@ class PlayerController:
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
                 if d_opp > SAFE_DIST:
-                    priority = 800 - depth * 20  # higher enemy territory priority
+                    priority = 1100 - depth * 20  # higher enemy territory priority
 
             if priority > -900:
                 priority += count_paintable(r, c) * 2
