@@ -46,6 +46,14 @@ class PlayerController:
         def cell_owner(r, c):
             return board.cells[r][c].owner_parity
 
+        total_hills = len(board.hills)
+        my_hills = len(me.controlled_hills)
+        opp_hills = len(opp.controlled_hills)
+        late_tiebreak = board.turn_count >= 1800
+        late_hill_chase = late_tiebreak and my_hills <= opp_hills
+        late_cell_chase = late_tiebreak and my_hills == opp_hills
+        late_hill_protect = late_tiebreak and my_hills > opp_hills
+
         # Adaptive safety based on stamina advantage
         stamina_diff = stamina - opp_stamina
         if stamina_diff > 30:
@@ -154,18 +162,23 @@ class PlayerController:
 
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
+                late_bonus = 0
+                if late_hill_chase and hill.controller_parity != player_parity:
+                    late_bonus += 250
+                elif late_hill_protect and hill.controller_parity == player_parity and cell.owner_parity == 0:
+                    late_bonus += 180
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 - depth * 20
+                        priority = 2500 - depth * 20 + late_bonus
                     else:
-                        priority = 1200 - depth * 20
+                        priority = 1200 - depth * 20 + late_bonus
                 elif hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 - depth * 20
+                        priority = 2000 - depth * 20 + late_bonus
                     else:
-                        priority = 1000 - depth * 20
+                        priority = 1000 - depth * 20 + late_bonus
                 elif cell.owner_parity == 0:
-                    priority = 800 - depth * 15
+                    priority = 800 - depth * 15 + late_bonus
 
             if cell.powerup:
                 # Dynamic depth penalty: when low stamina, only chase NEARBY powerups
@@ -178,6 +191,8 @@ class PlayerController:
 
             if cell.owner_parity == 0 and priority < -900:
                 priority = 900 - depth * 20
+                if late_cell_chase:
+                    priority += 120
 
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
@@ -240,9 +255,17 @@ class PlayerController:
 
             if pcell.owner_parity == player_parity:
                 if pcell.hill_id and pcell.hill_id != 0 and abs(pcell.paint_value) < GameConstants.MAX_PAINT_VALUE:
-                    paint_candidates.append((80, pr, pc))
+                    pscore = 80
+                    if late_hill_protect and board.hills[pcell.hill_id].controller_parity == player_parity:
+                        pscore += 40
+                    paint_candidates.append((pscore, pr, pc))
                 continue
             pscore = 200 if (pcell.hill_id and pcell.hill_id != 0) else 100
+            if pcell.hill_id and pcell.hill_id != 0:
+                if late_hill_chase and board.hills[pcell.hill_id].controller_parity != player_parity:
+                    pscore += 60
+            elif late_cell_chase:
+                pscore += 20
             # Forward bias: prefer painting in the movement direction
             if (pr - new_r, pc - new_c) == (ddr, ddc):
                 pscore += 15
