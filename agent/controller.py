@@ -128,6 +128,12 @@ class PlayerController:
                 return 0
             return self.opp
 
+        def unsafe_regular_landing(r, c):
+            return (
+                opp_dist.get((r, c)) is not None and
+                owner_after_regular_move(r, c) != player_parity
+            )
+
         # If we can reach the opponent's current square this turn on a neutral/friendly cell,
         # spend the turn on the immediate win instead of saving stamina.
         effective_stamina = stamina
@@ -175,8 +181,11 @@ class PlayerController:
                         for dr2, dc2 in DR:
                             off_r, off_c = nr + dr2, nc + dc2
                             if valid(off_r, off_c) and cell_owner(off_r, off_c) != self.opp:
-                                if mdist(off_r, off_c, opp_r, opp_c) > SAFE_DIST:
+                                safe_exit = not unsafe_regular_landing(off_r, off_c)
+                                if safe_exit or mdist(off_r, off_c, opp_r, opp_c) > SAFE_DIST:
                                     score = count_paintable(off_r, off_c)
+                                    if safe_exit:
+                                        score += 100
                                     if score > best_exit_score:
                                         best_exit_score = score
                                         best_exit = (dr2, dc2, off_r, off_c)
@@ -227,10 +236,8 @@ class PlayerController:
             if cell_owner(nr, nc) == self.opp and d_opp <= SAFE_DIST:
                 continue
 
-            opp_can_reach = opp_dist.get((nr, nc))
             if (
-                opp_can_reach is not None and
-                owner_after_regular_move(nr, nc) != player_parity and
+                unsafe_regular_landing(nr, nc) and
                 not board.cells[nr][nc].powerup and
                 not board.cells[nr][nc].hill_id
             ):
