@@ -163,7 +163,7 @@ class PlayerController:
                     priority = 1100 - depth * 20  # higher enemy territory priority
 
             if priority > -900:
-                priority += count_paintable(r, c) * 2
+                pass  # removed paintable tiebreak
 
             if priority > best_priority:
                 best_priority = priority
@@ -233,4 +233,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v106b"
+        return ""
