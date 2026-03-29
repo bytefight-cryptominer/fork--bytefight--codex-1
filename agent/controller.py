@@ -96,6 +96,13 @@ class PlayerController:
                                     ]
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
+        # --- Domination detection ---
+        import math
+        total_hills = sum(1 for hid in board.hills if hid != 0)
+        my_hills = len(me.controlled_hills)
+        needed_for_dom = math.ceil(total_hills * GameConstants.DOMINATION_WIN_THRESHOLD) if total_hills > 0 else 999
+        domination_rush = (my_hills >= needed_for_dom - 1 and total_hills > 0 and my_hills < needed_for_dom)
+
         # --- BFS ---
         best_first_dir = None
         best_priority = -999999
@@ -132,16 +139,18 @@ class PlayerController:
 
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
+                # Domination rush: EXTREME priority for uncaptured hills when 1 away from winning
+                dom_bonus = 2000 if (domination_rush and hill.controller_parity != player_parity) else 0
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 - depth * 20
+                        priority = 2500 + dom_bonus - depth * 20
                     else:
                         priority = 1200 - depth * 20
                 elif hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 - depth * 20
+                        priority = 2000 + dom_bonus - depth * 20
                     else:
-                        priority = 1000 - depth * 20
+                        priority = 1000 + dom_bonus - depth * 20
                 elif cell.owner_parity == 0:
                     priority = 800 - depth * 15
 
@@ -156,15 +165,11 @@ class PlayerController:
 
             if cell.owner_parity == 0 and priority < -900:
                 priority = 900 - depth * 20
-                # Voronoi frontier bonus: cells equidistant from both players
-                opp_bfs_dist = mdist(r, c, opp_r, opp_c)
-                if abs(depth - opp_bfs_dist) <= 1:
-                    priority += 40  # contested frontier
 
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
                 if d_opp > SAFE_DIST:
-                    priority = 1100 - depth * 20
+                    priority = 1100 - depth * 20  # higher enemy territory priority
 
             if priority > -900:
                 priority += count_paintable(r, c) * 2
