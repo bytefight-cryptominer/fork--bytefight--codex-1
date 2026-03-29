@@ -200,12 +200,15 @@ class PlayerController:
             pscore = 0
             if pcell.hill_id and pcell.hill_id != 0:
                 pscore += 200
-            if pr == my_r and pc == my_c:
-                pscore += 150
+            is_behind = (pr == my_r and pc == my_c)
             if pcell.owner_parity == 0:
                 pscore += 100
+                if is_behind:
+                    pscore += 200  # high: claim the neutral cell we just left
             else:
                 pscore += 10
+                if is_behind:
+                    pscore += 30  # low: behind reinforcement is lower priority
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
