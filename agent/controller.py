@@ -454,6 +454,42 @@ class PlayerController:
             frontier = next_frontier
         return danger
 
+    def _max_regular_moves(self, stamina_budget):
+        moves = 1
+        next_cost = GameConstants.EXTRA_MOVE_COST
+        while stamina_budget >= next_cost:
+            stamina_budget -= next_cost
+            moves += 1
+            next_cost += GameConstants.EXTRA_MOVE_COST
+        return moves
+
+    def _shortest_path_dirs(self, board, start_r, start_c, goal_r, goal_c, max_depth):
+        queue = deque([(start_r, start_c, 0)])
+        parents = {(start_r, start_c): None}
+
+        while queue:
+            r, c, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            for d in Direction.cardinals():
+                nl = Location(r, c) + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                if (nl.r, nl.c) in parents:
+                    continue
+                parents[(nl.r, nl.c)] = ((r, c), d)
+                if nl.r == goal_r and nl.c == goal_c:
+                    path = []
+                    cur = (nl.r, nl.c)
+                    while parents[cur] is not None:
+                        prev, move_dir = parents[cur]
+                        path.append(move_dir)
+                        cur = prev
+                    path.reverse()
+                    return path
+                queue.append((nl.r, nl.c, depth + 1))
+        return None
+
     def bid(self, board: Board, player_parity: int, time_left: Callable) -> int:
         try:
             me = board.get_player(player_parity)
@@ -715,6 +751,24 @@ class PlayerController:
         except Exception:
             opp = None
             opp_r, opp_c = -100, -100
+
+        if opp and board.cells[opp_r][opp_c].owner_parity != -player_parity:
+            effective_stamina = me.stamina
+            if board.cells[me.loc.r][me.loc.c].powerup:
+                effective_stamina = min(
+                    me.max_stamina,
+                    me.stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                )
+            kill_path = self._shortest_path_dirs(
+                board,
+                me.loc.r,
+                me.loc.c,
+                opp_r,
+                opp_c,
+                self._max_regular_moves(effective_stamina),
+            )
+            if kill_path:
+                return [Action.Move(move_dir) for move_dir in kill_path]
 
         # Track opponent position history for velocity
         if opp:
