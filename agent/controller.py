@@ -55,7 +55,7 @@ class PlayerController:
         elif stamina_diff < -30:
             SAFE_DIST = 6
         else:
-            SAFE_DIST = 4
+            SAFE_DIST = 5
 
         def count_paintable(r, c):
             count = 0
@@ -72,7 +72,7 @@ class PlayerController:
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
-        if stamina >= 55:  # 40 erase + 15 paint buffer
+        if stamina >= 60:  # 40 erase + 15 paint buffer
             for dr, dc in DR:
                 nr, nc = my_r + dr, my_c + dc
                 if not valid(nr, nc):
@@ -218,4 +218,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v74"
+        return "v75"
