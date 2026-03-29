@@ -892,8 +892,14 @@ class PlayerController:
             sim_turns = 0
             max_candidates = 0
 
-        # Use simulation if we have time and multiple candidates
-        if sim_turns > 0 and len(candidates) > 1:
+        # The rollout is most useful as a tie-breaker; trust the BFS top pick
+        # when it is already clearly ahead.
+        rollout_margin = 2.5
+        if (
+            sim_turns > 0
+            and len(candidates) > 1
+            and candidates[0][0] - candidates[1][0] <= rollout_margin
+        ):
             move_dir = self._simulate_candidates(board, me, player_parity,
                                                  candidates, opp,
                                                  sim_turns, max_candidates)
