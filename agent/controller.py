@@ -242,7 +242,7 @@ class PlayerController:
             if unsafe_regular_landing(nr, nc):
                 if not board.cells[nr][nc].powerup and not board.cells[nr][nc].hill_id:
                     continue
-                seed_penalty = 350
+                seed_penalty = 450
 
             visited.add((nr, nc))
             queue.append((nr, nc, DIR_MAP[(dr, dc)], 1, seed_penalty))
