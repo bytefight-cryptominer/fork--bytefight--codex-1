@@ -96,20 +96,6 @@ class PlayerController:
                                     ]
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
-        # --- BFS from opponent to compute their distances ---
-        opp_dist = {}
-        opp_q = deque([(opp_r, opp_c, 0)])
-        opp_dist[(opp_r, opp_c)] = 0
-        while opp_q:
-            or2, oc2, od = opp_q.popleft()
-            if od >= 20:
-                break
-            for dr, dc in DR:
-                onr, onc = or2 + dr, oc2 + dc
-                if (onr, onc) not in opp_dist and valid(onr, onc):
-                    opp_dist[(onr, onc)] = od + 1
-                    opp_q.append((onr, onc, od + 1))
-
         # --- BFS ---
         best_first_dir = None
         best_priority = -999999
@@ -146,17 +132,14 @@ class PlayerController:
 
             if cell.hill_id and cell.hill_id != 0:
                 hill = board.hills[cell.hill_id]
-                # Contest bonus: if opponent can also reach this hill fast, it's more valuable
-                od = opp_dist.get((r, c), 99)
-                contest = 200 if od <= depth + 3 else 0  # opponent is close too
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 + contest - depth * 20
+                        priority = 2500 - depth * 20
                     else:
                         priority = 1200 - depth * 20
                 elif hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 + contest - depth * 20
+                        priority = 2000 - depth * 20
                     else:
                         priority = 1000 - depth * 20
                 elif cell.owner_parity == 0:
@@ -236,17 +219,20 @@ class PlayerController:
             pscore = 0
             if pcell.hill_id and pcell.hill_id != 0:
                 if pcell.owner_parity == player_parity:
-                    pscore += 80  # reinforce hill cells only
+                    pscore += 80
                 else:
                     pscore += 200
             is_behind = (pr == my_r and pc == my_c)
+            is_ahead = (pr == new_r + ddr and pc == new_c + ddc)
             if pcell.owner_parity == 0:
                 pscore += 100
                 if is_behind:
-                    pscore += 200
+                    pscore += 200  # claim cell we just left
+                if is_ahead:
+                    pscore += 150  # paint cell we'll step onto next turn
             elif pcell.owner_parity == player_parity:
                 if pcell.hill_id and pcell.hill_id != 0:
-                    pass  # already scored above
+                    pass
                 else:
                     continue  # SKIP all non-hill reinforcement
             paint_candidates.append((pscore, pr, pc))
