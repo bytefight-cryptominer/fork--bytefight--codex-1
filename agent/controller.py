@@ -238,18 +238,17 @@ class PlayerController:
             if cell_owner(nr, nc) == self.opp and d_opp <= SAFE_DIST:
                 continue
 
-            if (
-                unsafe_regular_landing(nr, nc) and
-                not board.cells[nr][nc].powerup and
-                not board.cells[nr][nc].hill_id
-            ):
-                continue
+            seed_penalty = 0
+            if unsafe_regular_landing(nr, nc):
+                if not board.cells[nr][nc].powerup and not board.cells[nr][nc].hill_id:
+                    continue
+                seed_penalty = 350
 
             visited.add((nr, nc))
-            queue.append((nr, nc, DIR_MAP[(dr, dc)], 1))
+            queue.append((nr, nc, DIR_MAP[(dr, dc)], 1, seed_penalty))
 
         while queue:
-            r, c, first_dir, depth = queue.popleft()
+            r, c, first_dir, depth, seed_penalty = queue.popleft()
             if depth > 35:
                 break
 
@@ -290,6 +289,7 @@ class PlayerController:
 
             if priority > -900:
                 priority += count_paintable(r, c) * 3
+                priority -= seed_penalty
 
             if priority > best_priority:
                 best_priority = priority
@@ -304,7 +304,7 @@ class PlayerController:
                     # At deeper depths, allow traversal for reachability
                     # (we won't walk there directly; BFS tracks first_dir from safe seeds)
                     visited.add((nr, nc))
-                    queue.append((nr, nc, first_dir, depth + 1))
+                    queue.append((nr, nc, first_dir, depth + 1, seed_penalty))
 
         if best_first_dir is None:
             for dr, dc in DR:
