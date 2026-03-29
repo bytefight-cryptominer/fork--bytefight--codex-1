@@ -134,6 +134,14 @@ class PlayerController:
                 owner_after_regular_move(r, c) != player_parity
             )
 
+        def objective_seed_penalty(r, c):
+            cell = board.cells[r][c]
+            if cell.powerup:
+                return 500
+            if cell.hill_id:
+                return 250
+            return 0
+
         # If we can reach the opponent's current square this turn on a neutral/friendly cell,
         # spend the turn on the immediate win instead of saving stamina.
         effective_stamina = stamina
@@ -242,7 +250,7 @@ class PlayerController:
             if unsafe_regular_landing(nr, nc):
                 if not board.cells[nr][nc].powerup and not board.cells[nr][nc].hill_id:
                     continue
-                seed_penalty = 350
+                seed_penalty = objective_seed_penalty(nr, nc)
 
             visited.add((nr, nc))
             queue.append((nr, nc, DIR_MAP[(dr, dc)], 1, seed_penalty))
