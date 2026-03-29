@@ -136,10 +136,6 @@ class PlayerController:
 
             if cell.owner_parity == 0 and priority < -900:
                 priority = 900 - depth * 20
-                # Safe expansion: small bonus for neutral cells far from opponent
-                opp_d = mdist(r, c, opp_r, opp_c)
-                if opp_d >= 8:
-                    priority += 20
 
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
@@ -221,4 +217,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return ""
+        return "d35x"
