@@ -71,8 +71,8 @@ class PlayerController:
             return count
 
         # --- Erase step for hill cells with opponent paint ---
-        # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
-        if stamina >= 55:  # 40 erase + 15 paint buffer
+        # Distance 1: erase adjacent opponent hill cells
+        if stamina >= 55:
             for dr, dc in DR:
                 nr, nc = my_r + dr, my_c + dc
                 if not valid(nr, nc):
@@ -83,6 +83,25 @@ class PlayerController:
                     if nr == opp_r and nc == opp_c:
                         continue
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
+
+        # Distance 2: double-move erase ONLY for max-layer (4) opponent hill cells
+        if stamina >= 80:
+            for dr, dc in DR:
+                nr, nc = my_r + dr, my_c + dc
+                if not valid(nr, nc) or (nr == opp_r and nc == opp_c):
+                    continue
+                if cell_owner(nr, nc) == self.opp and mdist(nr, nc, opp_r, opp_c) <= SAFE_DIST:
+                    continue
+                for dr2, dc2 in DR:
+                    nr2, nc2 = nr + dr2, nc + dc2
+                    if not valid(nr2, nc2) or (nr2, nc2) == (opp_r, opp_c):
+                        continue
+                    ecell2 = board.cells[nr2][nc2]
+                    if (ecell2.hill_id and ecell2.hill_id != 0 and
+                        ecell2.owner_parity == self.opp and
+                        abs(ecell2.paint_value) >= 4):
+                        return [Action.Move(DIR_MAP[(dr, dc)]),
+                                Action.Move(DIR_MAP[(dr2, dc2)], move_type=MoveType.ERASE)]
 
         # --- BFS ---
         best_first_dir = None
