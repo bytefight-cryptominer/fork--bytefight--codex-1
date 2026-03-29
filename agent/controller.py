@@ -793,7 +793,7 @@ class PlayerController:
         best_actions = None
         best_score = -999999.0
         beam = [(base_score if base_score is not None else -999999.0, board.get_copy(), [])]
-        max_depth = 2
+        max_depth = 1
         beam_width = 3
 
         for _ in range(max_depth):
