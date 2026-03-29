@@ -7,7 +7,7 @@ from game import *
 
 class PlayerController:
     """
-    v126: v124 + lower erase threshold from 55 to 50.
+    v133: v126 + smarter erase exit direction (prefer more paintable neighbors).
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -83,33 +83,39 @@ class PlayerController:
                         continue
                     # Erase + move + paint combo when possible
                     if stamina >= 65:
+                        # Find best exit direction (most paintable neighbors)
+                        best_exit = None
+                        best_exit_score = -1
                         for dr2, dc2 in DR:
                             off_r, off_c = nr + dr2, nc + dc2
                             if valid(off_r, off_c) and cell_owner(off_r, off_c) != self.opp:
                                 if mdist(off_r, off_c, opp_r, opp_c) > SAFE_DIST:
-                                    combo = [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
-                                    # Add intermediate paints from erased position
-                                    # Paint adjacent hill cells before moving away
-                                    reserve = 25 if board.turn_count > 1400 else 10
-                                    extra_budget = stamina - 65 - reserve  # 65 = base combo cost
-                                    hill_id = ecell.hill_id
-                                    for dr3, dc3 in DR:
-                                        if extra_budget < GameConstants.PAINT_STAMINA_COST:
-                                            break
-                                        pr, pc = nr + dr3, nc + dc3
-                                        if not valid(pr, pc) or (pr == off_r and pc == off_c):
-                                            continue
-                                        pcell = board.cells[pr][pc]
-                                        if pcell.is_wall:
-                                            continue
-                                        # Only paint neutral cells on same hill
-                                        if (pcell.hill_id == hill_id and
-                                            pcell.owner_parity == 0):
-                                            combo.append(Action.Paint(Location(pr, pc)))
-                                            extra_budget -= GameConstants.PAINT_STAMINA_COST
-                                    combo.append(Action.Move(DIR_MAP[(dr2, dc2)]))
-                                    combo.append(Action.Paint(Location(nr, nc)))
-                                    return combo
+                                    score = count_paintable(off_r, off_c)
+                                    if score > best_exit_score:
+                                        best_exit_score = score
+                                        best_exit = (dr2, dc2, off_r, off_c)
+                        if best_exit:
+                            dr2, dc2, off_r, off_c = best_exit
+                            combo = [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
+                            reserve = 25 if board.turn_count > 1400 else 10
+                            extra_budget = stamina - 65 - reserve
+                            hill_id = ecell.hill_id
+                            for dr3, dc3 in DR:
+                                if extra_budget < GameConstants.PAINT_STAMINA_COST:
+                                    break
+                                pr, pc = nr + dr3, nc + dc3
+                                if not valid(pr, pc) or (pr == off_r and pc == off_c):
+                                    continue
+                                pcell = board.cells[pr][pc]
+                                if pcell.is_wall:
+                                    continue
+                                if (pcell.hill_id == hill_id and
+                                    pcell.owner_parity == 0):
+                                    combo.append(Action.Paint(Location(pr, pc)))
+                                    extra_budget -= GameConstants.PAINT_STAMINA_COST
+                            combo.append(Action.Move(DIR_MAP[(dr2, dc2)]))
+                            combo.append(Action.Paint(Location(nr, nc)))
+                            return combo
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
 
         # --- BFS ---
