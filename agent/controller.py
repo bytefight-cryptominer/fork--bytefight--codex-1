@@ -111,12 +111,9 @@ class PlayerController:
             visited.add((nr, nc))
             queue.append((nr, nc, DIR_MAP[(dr, dc)], 1))
 
-        # Adaptive depth: scale with map size
-        max_depth = min(rows + cols, 50)
-
         while queue:
             r, c, first_dir, depth = queue.popleft()
-            if depth > max_depth:
+            if depth > 35:
                 break
 
             cell = board.cells[r][c]
@@ -153,7 +150,7 @@ class PlayerController:
                 best_priority = priority
                 best_first_dir = first_dir
 
-            if depth < max_depth:
+            if depth < 35:
                 for dr, dc in DR:
                     nr, nc = r + dr, c + dc
                     if (nr, nc) in visited or not valid(nr, nc):
@@ -174,17 +171,29 @@ class PlayerController:
                 return Action.Move(Direction.UP)
 
         actions: List = []
-        actions.append(Action.Move(best_first_dir))
-
         ddr, ddc = INV_DIR[best_first_dir]
         new_r, new_c = my_r + ddr, my_c + ddc
 
         if not valid(new_r, new_c):
-            return actions
+            return [Action.Move(best_first_dir)]
+
+        # Double-move toward hills when target is at depth 2+ and stamina high
+        use_double = False
+        if best_priority >= 1500 and stamina >= 70:
+            nr2, nc2 = new_r + ddr, new_c + ddc
+            if valid(nr2, nc2) and mdist(nr2, nc2, opp_r, opp_c) > 0:
+                if not (cell_owner(nr2, nc2) == self.opp and mdist(nr2, nc2, opp_r, opp_c) <= SAFE_DIST):
+                    use_double = True
+
+        actions.append(Action.Move(best_first_dir))
+        if use_double:
+            actions.append(Action.Move(best_first_dir))
+            new_r, new_c = nr2, nc2
 
         # Late game conservation
+        extra = 10 if use_double else 0
         reserve = 25 if board.turn_count > 1400 else 10
-        paint_budget = stamina - reserve
+        paint_budget = stamina - reserve - extra
         paint_spent = 0
 
         paint_candidates = []
