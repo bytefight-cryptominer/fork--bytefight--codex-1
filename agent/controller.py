@@ -499,6 +499,355 @@ class PlayerController:
             frontier = next_frontier
         return danger
 
+    def _multi_source_distance(self, board, sources):
+        dist = {}
+        queue = deque()
+        for loc in sources:
+            if board.oob(loc) or board.cells[loc.r][loc.c].is_wall:
+                continue
+            key = (loc.r, loc.c)
+            if key in dist:
+                continue
+            dist[key] = 0
+            queue.append(loc)
+
+        while queue:
+            pos = queue.popleft()
+            cur = dist[(pos.r, pos.c)]
+            for d in Direction.cardinals():
+                nl = pos + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                key = (nl.r, nl.c)
+                if key in dist:
+                    continue
+                dist[key] = cur + 1
+                queue.append(nl)
+
+        return dist
+
+    def _goal_approach_context(self, board, target):
+        goal_cells = {(r, c) for r, c in target}
+        sources = [Location(r, c) for r, c in goal_cells]
+        for r, c in goal_cells:
+            loc = Location(r, c)
+            for d in Direction.cardinals():
+                nl = loc + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                sources.append(nl)
+        return goal_cells, self._multi_source_distance(board, sources)
+
+    def _estimate_next_regen(self, board, parity):
+        regen = GameConstants.BASE_STAMINA_REGEN
+        regen += (
+            board._count_adjacent_friendly(parity)
+            * GameConstants.ADJACENT_REGEN_BONUS
+        )
+        regen += min(
+            board.get_territory_count(parity) // GameConstants.GLOBAL_PAINT_REGEN_RATIO,
+            GameConstants.GLOBAL_PAINT_REGEN_CAP,
+        )
+        if board.turn_count >= GameConstants.GLOBAL_DECAY_TURN_THRESHOLD + 200:
+            delta = board.turn_count - (GameConstants.GLOBAL_DECAY_TURN_THRESHOLD + 200)
+            intervals = (delta // 200) + 1
+            regen -= intervals * GameConstants.GLOBAL_DECAY_REGEN_PENALTY
+        return max(0, regen)
+
+    def _collect_beacons(self, board, parity):
+        beacons = []
+        rows = len(board.cells)
+        cols = len(board.cells[0])
+        for r in range(rows):
+            for c in range(cols):
+                if board.cells[r][c].beacon_parity == parity:
+                    beacons.append(Location(r, c))
+        return beacons
+
+    def _reachable_cells(self, board, starts, max_steps):
+        if max_steps < 0:
+            return set()
+        seen = set()
+        queue = deque()
+        for loc in starts:
+            if board.oob(loc) or board.cells[loc.r][loc.c].is_wall:
+                continue
+            key = (loc.r, loc.c)
+            if key in seen:
+                continue
+            seen.add(key)
+            queue.append((loc, 0))
+
+        while queue:
+            pos, depth = queue.popleft()
+            if depth >= max_steps:
+                continue
+            for d in Direction.cardinals():
+                nl = pos + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                key = (nl.r, nl.c)
+                if key in seen:
+                    continue
+                seen.add(key)
+                queue.append((nl, depth + 1))
+
+        return seen
+
+    def _opponent_unsafe_cells(self, board, parity, opp):
+        if not opp:
+            return set()
+
+        step_cap = 3 if self.map_tier == 'small' else 4
+        steps = min(step_cap, self._max_regular_moves(opp.stamina))
+        danger = self._reachable_cells(board, [opp.loc], steps)
+
+        opp_parity = -parity
+        opp_beacons = self._collect_beacons(board, opp_parity)
+        if not opp_beacons:
+            return danger
+
+        can_teleport = board.cells[opp.loc.r][opp.loc.c].beacon_parity == opp_parity
+        if not can_teleport:
+            for d in Direction.cardinals():
+                nl = opp.loc + d
+                if board.oob(nl):
+                    continue
+                if board.cells[nl.r][nl.c].beacon_parity == opp_parity:
+                    can_teleport = True
+                    break
+
+        if can_teleport:
+            danger.update((loc.r, loc.c) for loc in opp_beacons)
+            teleport_steps = max(1, steps - 1)
+            danger.update(self._reachable_cells(board, opp_beacons, teleport_steps))
+
+        return danger
+
+    def _tile_secure(self, board, loc, parity):
+        cell = board.cells[loc.r][loc.c]
+        if cell.owner_parity != parity:
+            return False
+
+        rows = len(board.cells)
+        cols = len(board.cells[0])
+        if self._count_local(board, loc, parity, rows, cols) >= 7:
+            return True
+
+        if cell.hill_id and cell.hill_id in board.get_player(parity).controlled_hills:
+            return True
+
+        return False
+
+    def _rank_plan_paints(self, board, loc, parity, goal_cells, limit=2):
+        player = board.get_player(parity)
+        if player.stamina < GameConstants.PAINT_STAMINA_COST:
+            return []
+
+        ranked = []
+        for d in Direction.cardinals():
+            t = loc + d
+            if board.oob(t):
+                continue
+            cell = board.cells[t.r][t.c]
+            if not self._can_paint(cell, parity):
+                continue
+
+            score = 0.0
+            if (t.r, t.c) in goal_cells:
+                score += 14.0 if cell.owner_parity == 0 else 8.0
+            if (t.r, t.c) in self.hill_set:
+                score += 10.0 if cell.owner_parity != parity else 5.0
+            elif cell.owner_parity == 0:
+                score += 4.0
+            if cell.powerup:
+                score += 4.0
+            ranked.append((score, t))
+
+        ranked.sort(key=lambda x: -x[0])
+        return [loc for score, loc in ranked[:limit] if score > 0]
+
+    def _score_plan_state(
+        self,
+        plan_board,
+        start_board,
+        parity,
+        goal_cells,
+        goal_dist,
+        unsafe_cells,
+        start_metrics,
+    ):
+        me = plan_board.get_player(parity)
+        opp = plan_board.get_player(-parity)
+        final_key = (me.loc.r, me.loc.c)
+
+        if final_key in unsafe_cells and not self._tile_secure(plan_board, me.loc, parity):
+            return None
+
+        start_territory, start_opp_territory, start_hills, start_goal_owned = start_metrics
+        my_territory = plan_board.get_territory_count(parity)
+        opp_territory = plan_board.get_territory_count(-parity)
+        hill_gain = len(me.controlled_hills) - start_hills
+        goal_owned = sum(
+            1 for r, c in goal_cells if plan_board.cells[r][c].owner_parity == parity
+        )
+        goal_denied = sum(
+            1
+            for r, c in goal_cells
+            if start_board.cells[r][c].owner_parity == -parity
+            and plan_board.cells[r][c].owner_parity != -parity
+        )
+        dist = goal_dist.get(final_key, max(plan_board.board_size.r, plan_board.board_size.c))
+        regen = self._estimate_next_regen(plan_board, parity)
+
+        opp_near = False
+        if opp:
+            opp_near = abs(me.loc.r - opp.loc.r) + abs(me.loc.c - opp.loc.c) <= 6
+        stamina_weight = 1.8 if opp_near else 0.9
+
+        score = 0.0
+        score += hill_gain * 140.0
+        score += (goal_owned - start_goal_owned) * 24.0
+        score += goal_denied * 10.0
+        score += (my_territory - start_territory) * 4.0
+        score += (start_opp_territory - opp_territory) * 2.0
+        score += max(0, 8 - dist) * 4.0
+        score += me.stamina * stamina_weight
+        score += regen * (1.6 if opp_near else 1.0)
+        if final_key in goal_cells:
+            score += 12.0
+        if self._tile_secure(plan_board, me.loc, parity):
+            score += 12.0
+        elif final_key in unsafe_cells:
+            score -= 16.0
+
+        return score
+
+    def _expand_plan_states(
+        self,
+        sim_board,
+        actions,
+        parity,
+        goal_cells,
+        goal_dist,
+    ):
+        me = sim_board.get_player(parity)
+
+        move_choices = []
+        for d in Direction.cardinals():
+            step = me.loc + d
+            if sim_board.oob(step) or sim_board.cells[step.r][step.c].is_wall:
+                continue
+            cell = sim_board.cells[step.r][step.c]
+            rough = 0.0
+            rough += max(0, 6 - goal_dist.get((step.r, step.c), 99)) * 2.5
+            if (step.r, step.c) in goal_cells:
+                rough += 18.0
+            elif (step.r, step.c) in self.hill_set:
+                rough += 10.0
+            if cell.powerup:
+                rough += 10.0
+            if cell.owner_parity == -parity:
+                rough += 6.0
+                move_choices.append((rough + 4.0, Action.Move(d, move_type=MoveType.ERASE)))
+            move_choices.append((rough, Action.Move(d)))
+
+        move_choices.sort(key=lambda x: -x[0])
+        prepaint_variants = [None]
+        prepaint_variants.extend(self._rank_plan_paints(sim_board, me.loc, parity, goal_cells, limit=1))
+
+        children = []
+        for _, move_action in move_choices[:4]:
+            for prepaint_loc in prepaint_variants:
+                child = sim_board.get_copy()
+                child_actions = list(actions)
+                if prepaint_loc is not None:
+                    prepaint = Action.Paint(prepaint_loc)
+                    if not child.apply_action(parity, prepaint):
+                        continue
+                    child_actions.append(prepaint)
+                if not child.apply_action(parity, move_action):
+                    continue
+                child_actions.append(move_action)
+                for _ in range(2):
+                    child_me = child.get_player(parity)
+                    ranked = self._rank_plan_paints(
+                        child, child_me.loc, parity, goal_cells, limit=1
+                    )
+                    if not ranked:
+                        break
+                    postpaint = Action.Paint(ranked[0])
+                    if not child.apply_action(parity, postpaint):
+                        break
+                    child_actions.append(postpaint)
+                children.append((child, child_actions))
+
+        return children
+
+    def _search_hill_plan(self, board, me, parity, opp, target, near_opp, time_left):
+        if not target:
+            return None
+
+        goal_cells, goal_dist = self._goal_approach_context(board, target)
+        start_key = (me.loc.r, me.loc.c)
+        if goal_dist.get(start_key, 99) > 6 and not near_opp:
+            return None
+
+        unsafe_cells = self._opponent_unsafe_cells(board, parity, opp)
+        start_metrics = (
+            board.get_territory_count(parity),
+            board.get_territory_count(-parity),
+            len(me.controlled_hills),
+            sum(1 for r, c in goal_cells if board.cells[r][c].owner_parity == parity),
+        )
+        base_score = self._score_plan_state(
+            board,
+            board,
+            parity,
+            goal_cells,
+            goal_dist,
+            unsafe_cells,
+            start_metrics,
+        )
+
+        best_actions = None
+        best_score = -999999.0
+        beam = [(base_score if base_score is not None else -999999.0, board.get_copy(), [])]
+        max_depth = 3 if near_opp else 4
+        beam_width = 6 if near_opp else 8
+
+        for _ in range(max_depth):
+            if time_left() < 8:
+                break
+            next_beam = []
+            for _, sim_board, actions in beam:
+                for child_board, child_actions in self._expand_plan_states(
+                    sim_board, actions, parity, goal_cells, goal_dist
+                ):
+                    score = self._score_plan_state(
+                        child_board,
+                        board,
+                        parity,
+                        goal_cells,
+                        goal_dist,
+                        unsafe_cells,
+                        start_metrics,
+                    )
+                    if score is None:
+                        continue
+                    if score > best_score:
+                        best_score = score
+                        best_actions = child_actions
+                    next_beam.append((score, child_board, child_actions))
+            if not next_beam:
+                break
+            next_beam.sort(key=lambda x: x[0], reverse=True)
+            beam = next_beam[:beam_width]
+
+        if best_actions and best_score > (base_score if base_score is not None else 0) + 8.0:
+            return best_actions
+        return None
+
     def _max_regular_moves(self, stamina_budget):
         moves = 1
         next_cost = GameConstants.EXTRA_MOVE_COST
@@ -866,6 +1215,15 @@ class PlayerController:
         else:
             near_opp = dist_to_opp <= 4 or (approaching and dist_to_opp <= 6)
 
+        target = self._find_target_hill(board, me, player_parity, opp_r, opp_c)
+        tl_now = time_left()
+        if target and tl_now > 20 and me.stamina >= 25:
+            planned = self._search_hill_plan(
+                board, me, player_parity, opp, target, near_opp, time_left
+            )
+            if planned:
+                return planned
+
         # === POWERUP COLLECTION ===
         powerup_action = self._check_powerup(board, me, player_parity, danger, near_opp)
         if powerup_action:
@@ -888,7 +1246,6 @@ class PlayerController:
                     return result
 
         # === SIMULATION LAYER: evaluate candidate directions ===
-        target = self._find_target_hill(board, me, player_parity, opp_r, opp_c)
 
         # Get candidate directions with scores
         candidates = self._find_move_candidates(board, me, player_parity, rows, cols,
