@@ -159,8 +159,7 @@ class PlayerController:
                     continue
                 ecell = board.cells[nr][nc]
                 if (ecell.hill_id and ecell.hill_id != 0 and
-                    ecell.owner_parity == self.opp and
-                    board.hills[ecell.hill_id].controller_parity != player_parity):
+                    ecell.owner_parity == self.opp):
                     if nr == opp_r and nc == opp_c:
                         continue
                     if stamina >= 65:
@@ -210,7 +209,7 @@ class PlayerController:
                 hill = board.hills[cell.hill_id]
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 - depth * 20
+                        priority = 3000 - depth * 20  # capturing opp hill = 80pt stamina swing
                     else:
                         priority = 1200 - depth * 20
                 elif hill.controller_parity == 0:
