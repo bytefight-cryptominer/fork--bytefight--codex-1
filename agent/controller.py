@@ -7,9 +7,8 @@ from game import *
 
 class PlayerController:
     """
-    v113: Enhanced erase combo with intermediate hill paints.
-    Base: v106. Change: after erasing opponent hill cell, paint
-    additional hill cells from erased position before moving away.
+    v117: v113 + forward-biased paint tiebreak.
+    Small bonus (+15) for painting the cell in the movement direction.
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -239,6 +238,9 @@ class PlayerController:
                     paint_candidates.append((80, pr, pc))
                 continue
             pscore = 200 if (pcell.hill_id and pcell.hill_id != 0) else 100
+            # Forward bias: prefer painting in the movement direction
+            if (pr - new_r, pc - new_c) == (ddr, ddc):
+                pscore += 15
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
