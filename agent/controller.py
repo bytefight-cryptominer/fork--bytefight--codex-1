@@ -50,7 +50,9 @@ class PlayerController:
 
         # Adaptive safety based on stamina advantage
         stamina_diff = stamina - opp_stamina
-        if stamina_diff > 30:
+        if opp_stamina < 20:
+            SAFE_DIST = 1  # opponent is nearly dead, go all-in
+        elif stamina_diff > 30:
             SAFE_DIST = 3
         elif stamina_diff < -30:
             SAFE_DIST = 6
@@ -199,7 +201,7 @@ class PlayerController:
             return actions
 
         # Late game conservation
-        reserve = 15 if board.turn_count > 1400 else 10
+        reserve = 25 if board.turn_count > 1400 else 10
         paint_budget = stamina - reserve
         paint_spent = 0
 
