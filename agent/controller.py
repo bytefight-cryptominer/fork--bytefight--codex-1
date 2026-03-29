@@ -200,7 +200,7 @@ class LightBoard:
         return best_di, best_score
 
     def _apply_regen_for(self, owner):
-        """Approximate stamina regen: base 5 + adj*2 + territory/8, capped at 100."""
+        """Approximate stamina regen using the engine's local 5x5 friendly count."""
         if owner == 1:
             r, c = self.my_r, self.my_c
             territory = self.my_territory
@@ -211,13 +211,18 @@ class LightBoard:
             stamina = self.opp_stamina
 
         adj_count = 0
-        for di in range(4):
-            nr, nc = r + DR[di], c + DC[di]
-            if self._valid(nr, nc) and self.paint[nr][nc] == owner:
-                adj_count += 1
-        regen = 5 + adj_count * 2 + territory // 8
-        if regen > 50:
-            regen = 50
+        for dr in range(-GameConstants.ADJACENCY_RADIUS, GameConstants.ADJACENCY_RADIUS + 1):
+            for dc in range(-GameConstants.ADJACENCY_RADIUS, GameConstants.ADJACENCY_RADIUS + 1):
+                nr, nc = r + dr, c + dc
+                if self._valid(nr, nc) and self.paint[nr][nc] == owner:
+                    adj_count += 1
+        territory_bonus = min(
+            territory // GameConstants.GLOBAL_PAINT_REGEN_RATIO,
+            GameConstants.GLOBAL_PAINT_REGEN_CAP,
+        )
+        regen = GameConstants.BASE_STAMINA_REGEN
+        regen += adj_count * GameConstants.ADJACENT_REGEN_BONUS
+        regen += territory_bonus
         stamina = min(100, stamina + regen)
         if owner == 1:
             self.my_stamina = stamina
