@@ -197,22 +197,17 @@ class PlayerController:
             if pcell.owner_parity == player_parity and abs(pcell.paint_value) >= GameConstants.MAX_PAINT_VALUE:
                 continue
 
+            # ONLY paint neutral cells (skip ALL reinforcement)
+            if pcell.owner_parity == player_parity:
+                continue
             pscore = 0
             if pcell.hill_id and pcell.hill_id != 0:
-                if pcell.owner_parity == player_parity:
-                    pscore += 80  # reinforce hill cells only
-                else:
-                    pscore += 200
+                pscore += 200
             is_behind = (pr == my_r and pc == my_c)
             if pcell.owner_parity == 0:
                 pscore += 100
                 if is_behind:
                     pscore += 200
-            elif pcell.owner_parity == player_parity:
-                if pcell.hill_id and pcell.hill_id != 0:
-                    pass  # already scored above
-                else:
-                    continue  # SKIP all non-hill reinforcement
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
@@ -225,4 +220,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v81b"
+        return ""
