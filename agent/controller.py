@@ -216,25 +216,11 @@ class PlayerController:
             if pcell.owner_parity == player_parity and abs(pcell.paint_value) >= GameConstants.MAX_PAINT_VALUE:
                 continue
 
-            pscore = 0
-            if pcell.hill_id and pcell.hill_id != 0:
-                if pcell.owner_parity == player_parity:
-                    pscore += 80
-                else:
-                    pscore += 200
-            is_behind = (pr == my_r and pc == my_c)
-            is_ahead = (pr == new_r + ddr and pc == new_c + ddc)
-            if pcell.owner_parity == 0:
-                pscore += 100
-                if is_behind:
-                    pscore += 200  # claim cell we just left
-                if is_ahead:
-                    pscore += 150  # paint cell we'll step onto next turn
-            elif pcell.owner_parity == player_parity:
-                if pcell.hill_id and pcell.hill_id != 0:
-                    pass
-                else:
-                    continue  # SKIP all non-hill reinforcement
+            if pcell.owner_parity == player_parity:
+                if pcell.hill_id and pcell.hill_id != 0 and abs(pcell.paint_value) < GameConstants.MAX_PAINT_VALUE:
+                    paint_candidates.append((80, pr, pc))
+                continue
+            pscore = 200 if (pcell.hill_id and pcell.hill_id != 0) else 100
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
