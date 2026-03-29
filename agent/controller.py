@@ -490,6 +490,55 @@ class PlayerController:
                 queue.append((nl.r, nl.c, depth + 1))
         return None
 
+    def _shortest_distances(self, board, start_r, start_c, max_depth):
+        queue = deque([(start_r, start_c, 0)])
+        dist = {(start_r, start_c): 0}
+        while queue:
+            r, c, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            for d in Direction.cardinals():
+                nl = Location(r, c) + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                if (nl.r, nl.c) in dist:
+                    continue
+                dist[(nl.r, nl.c)] = depth + 1
+                queue.append((nl.r, nl.c, depth + 1))
+        return dist
+
+    def _owner_after_regular_move(self, board, r, c, parity):
+        paint_value = board.cells[r][c].paint_value
+        if paint_value == 0:
+            return 0
+        if (paint_value > 0) == (parity > 0):
+            return parity
+        next_value = paint_value + parity
+        if next_value == 0:
+            return 0
+        return -parity
+
+    def _unsafe_regular_landing(self, board, r, c, parity, opp_reachable):
+        return (
+            (r, c) in opp_reachable and
+            self._owner_after_regular_move(board, r, c, parity) != parity
+        )
+
+    def _count_paintable_neighbors(self, board, r, c, parity):
+        score = 0
+        for d in Direction.cardinals():
+            nl = Location(r, c) + d
+            if board.oob(nl):
+                continue
+            cell = board.cells[nl.r][nl.c]
+            if cell.is_wall:
+                continue
+            if cell.owner_parity == 0:
+                score += 2
+            elif cell.owner_parity == parity and self._can_paint(cell, parity):
+                score += 1
+        return score
+
     def bid(self, board: Board, player_parity: int, time_left: Callable) -> int:
         try:
             me = board.get_player(player_parity)
@@ -770,6 +819,21 @@ class PlayerController:
             if kill_path:
                 return [Action.Move(move_dir) for move_dir in kill_path]
 
+        opp_reachable = {}
+        if opp:
+            opp_effective_stamina = opp.stamina
+            if board.cells[opp_r][opp_c].powerup:
+                opp_effective_stamina = min(
+                    opp.max_stamina,
+                    opp.stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                )
+            opp_reachable = self._shortest_distances(
+                board,
+                opp_r,
+                opp_c,
+                self._max_regular_moves(opp_effective_stamina),
+            )
+
         # Track opponent position history for velocity
         if opp:
             self.opp_history.append((opp_r, opp_c))
@@ -874,7 +938,7 @@ class PlayerController:
         return self._build_actions(board, me, player_parity, rows, cols,
                                    opp_r, opp_c, danger, near_opp,
                                    move_dir, target, effective_safe_dist,
-                                   chase_danger)
+                                   chase_danger, opp_reachable)
 
     def _bfs_powerup(self, board, me, parity, danger, near_opp, max_dist=4):
         """BFS to find nearest powerup within max_dist steps."""
@@ -966,7 +1030,8 @@ class PlayerController:
 
     def _build_actions(self, board, me, parity, rows, cols,
                        opp_r, opp_c, danger, near_opp,
-                       move_dir, target, effective_safe_dist, chase_danger):
+                       move_dir, target, effective_safe_dist, chase_danger,
+                       opp_reachable):
         actions = []
         stamina = me.stamina
         painted = set()
@@ -1003,24 +1068,53 @@ class PlayerController:
 
             # ERASE: if stepping onto enemy-painted hill cell
             if (step.r, step.c) in self.hill_set and step_cell.owner_parity == -parity and stamina >= 80:
-                # Paint adjacent targets first
+                erase_landing_unsafe = (step.r, step.c) in opp_reachable
+                best_exit = None
+                best_exit_score = -1
+                for d in Direction.cardinals():
+                    rl = step + d
+                    if board.oob(rl):
+                        continue
+                    exit_cell = board.cells[rl.r][rl.c]
+                    if exit_cell.is_wall or exit_cell.owner_parity == -parity:
+                        continue
+                    safe_exit = not self._unsafe_regular_landing(
+                        board, rl.r, rl.c, parity, opp_reachable
+                    )
+                    if not safe_exit:
+                        exit_dist = abs(rl.r - opp_r) + abs(rl.c - opp_c)
+                        if exit_dist <= effective_safe_dist:
+                            continue
+                    score = self._count_paintable_neighbors(board, rl.r, rl.c, parity)
+                    if safe_exit:
+                        score += 100
+                    if rl.r == me.loc.r and rl.c == me.loc.c:
+                        score += 3
+                    if score > best_exit_score:
+                        best_exit_score = score
+                        best_exit = d
+
+                use_exit = best_exit is not None and (
+                    erase_landing_unsafe or dist_to_opp <= effective_safe_dist
+                )
+                if erase_landing_unsafe and not use_exit:
+                    m = self._any_safe_move(board, me, parity, danger, opp_r, opp_c)
+                    if m:
+                        actions.append(Action.Move(m))
+                    return actions
+
+                reserve_after_erase = 10 if use_exit else 0
                 for t in self._paintable(board, me.loc, parity, target):
-                    if stamina < 80:
+                    if stamina < 80 + reserve_after_erase:
                         break
                     actions.append(Action.Paint(t))
                     painted.add((t.r, t.c))
                     stamina -= 15
                 actions.append(Action.Move(move_dir, move_type=MoveType.ERASE))
                 stamina -= 50  # erase cost
-                # RETREAT after hill ERASE if opponent is close
-                if dist_to_opp <= effective_safe_dist and stamina >= 10:
-                    for d in Direction.cardinals():
-                        rl = step + d
-                        if not board.oob(rl) and rl.r == me.loc.r and rl.c == me.loc.c:
-                            if board.cells[rl.r][rl.c].owner_parity == parity:
-                                actions.append(Action.Move(d))
-                                stamina -= 10
-                            break
+                if use_exit and stamina >= 10:
+                    actions.append(Action.Move(best_exit))
+                    stamina -= 10
                 return actions
 
             # LATE-GAME ERASE: enemy border cells for territory expansion
