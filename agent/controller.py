@@ -65,7 +65,7 @@ class PlayerController:
                     continue
                 o = cell_owner(nr, nc)
                 if o == 0:
-                    count += 3  # heavier weight on neutral frontier
+                    count += 2
                 elif o == player_parity and abs(board.cells[nr][nc].paint_value) < GameConstants.MAX_PAINT_VALUE:
                     count += 1
             return count
@@ -217,4 +217,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return ""
+        return "final"
