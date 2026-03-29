@@ -88,7 +88,7 @@ class PlayerController:
                 if cell.owner_parity == player_parity:
                     territory += 1
                     paint_strength += abs(cell.paint_value)
-        hills = len(me.controlled_hills) * 400
+        hills = len(me.controlled_hills) * 100
         local = 0
         for dr in range(-2, 3):
             for dc in range(-2, 3):
