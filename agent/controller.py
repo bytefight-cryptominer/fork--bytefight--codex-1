@@ -77,29 +77,68 @@ class PlayerController:
                 next_cost += GameConstants.EXTRA_MOVE_COST
             return moves
 
-        def shortest_path_dirs(goal_r, goal_c, max_depth):
-            queue = deque([(my_r, my_c, 0)])
-            parents = {(my_r, my_c): None}
+        def kill_path_with_powerups():
+            if cell_owner(opp_r, opp_c) == self.opp or mdist(my_r, my_c, opp_r, opp_c) > 8:
+                return None
 
-            while queue:
-                r, c, depth = queue.popleft()
-                if depth >= max_depth:
-                    continue
+            start_stamina = stamina
+            if board.cells[my_r][my_c].powerup:
+                start_stamina = min(
+                    me.max_stamina,
+                    start_stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                )
+
+            def dfs(r, c, moves_taken, stamina_left, depth_left, visited):
+                if mdist(r, c, opp_r, opp_c) > depth_left:
+                    return None
+
                 for dr, dc in DR:
                     nr, nc = r + dr, c + dc
-                    if not valid(nr, nc) or (nr, nc) in parents:
+                    if not valid(nr, nc) or (nr, nc) in visited:
                         continue
-                    parents[(nr, nc)] = ((r, c), DIR_MAP[(dr, dc)])
-                    if nr == goal_r and nc == goal_c:
-                        path = []
-                        cur = (nr, nc)
-                        while parents[cur] is not None:
-                            prev, move_dir = parents[cur]
-                            path.append(move_dir)
-                            cur = prev
-                        path.reverse()
-                        return path
-                    queue.append((nr, nc, depth + 1))
+
+                    move_cost = GameConstants.EXTRA_MOVE_COST * moves_taken
+                    if stamina_left < move_cost:
+                        continue
+
+                    next_stamina = stamina_left - move_cost
+                    move_dir = DIR_MAP[(dr, dc)]
+
+                    if nr == opp_r and nc == opp_c:
+                        return [move_dir]
+
+                    if depth_left == 1:
+                        continue
+
+                    if board.cells[nr][nc].powerup:
+                        next_stamina = min(
+                            me.max_stamina,
+                            next_stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                        )
+
+                    result = dfs(
+                        nr,
+                        nc,
+                        moves_taken + 1,
+                        next_stamina,
+                        depth_left - 1,
+                        visited | {(nr, nc)},
+                    )
+                    if result:
+                        return [move_dir] + result
+                return None
+
+            for depth_limit in range(1, 9):
+                result = dfs(
+                    my_r,
+                    my_c,
+                    0,
+                    start_stamina,
+                    depth_limit,
+                    {(my_r, my_c)},
+                )
+                if result:
+                    return result
             return None
 
         def shortest_distances(start_r, start_c, max_depth):
@@ -136,20 +175,9 @@ class PlayerController:
 
         # If we can reach the opponent's current square this turn on a neutral/friendly cell,
         # spend the turn on the immediate win instead of saving stamina.
-        effective_stamina = stamina
-        if board.cells[my_r][my_c].powerup:
-            effective_stamina = min(
-                me.max_stamina,
-                stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
-            )
-        if cell_owner(opp_r, opp_c) != self.opp:
-            kill_path = shortest_path_dirs(
-                opp_r,
-                opp_c,
-                max_regular_moves(effective_stamina),
-            )
-            if kill_path:
-                return [Action.Move(move_dir) for move_dir in kill_path]
+        kill_path = kill_path_with_powerups()
+        if kill_path:
+            return [Action.Move(move_dir) for move_dir in kill_path]
 
         opp_effective_stamina = opp_stamina
         if board.cells[opp_r][opp_c].powerup:
