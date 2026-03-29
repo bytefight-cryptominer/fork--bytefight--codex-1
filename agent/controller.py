@@ -102,6 +102,32 @@ class PlayerController:
                     queue.append((nr, nc, depth + 1))
             return None
 
+        def shortest_distances(start_r, start_c, max_depth):
+            queue = deque([(start_r, start_c, 0)])
+            dist = {(start_r, start_c): 0}
+            while queue:
+                r, c, depth = queue.popleft()
+                if depth >= max_depth:
+                    continue
+                for dr, dc in DR:
+                    nr, nc = r + dr, c + dc
+                    if not valid(nr, nc) or (nr, nc) in dist:
+                        continue
+                    dist[(nr, nc)] = depth + 1
+                    queue.append((nr, nc, depth + 1))
+            return dist
+
+        def owner_after_regular_move(r, c):
+            paint_value = board.cells[r][c].paint_value
+            if paint_value == 0:
+                return 0
+            if (paint_value > 0) == (player_parity > 0):
+                return player_parity
+            next_value = paint_value + player_parity
+            if next_value == 0:
+                return 0
+            return self.opp
+
         # If we can reach the opponent's current square this turn on a neutral/friendly cell,
         # spend the turn on the immediate win instead of saving stamina.
         effective_stamina = stamina
@@ -118,6 +144,15 @@ class PlayerController:
             )
             if kill_path:
                 return [Action.Move(move_dir) for move_dir in kill_path]
+
+        opp_effective_stamina = opp_stamina
+        if board.cells[opp_r][opp_c].powerup:
+            opp_effective_stamina = min(
+                opp.max_stamina,
+                opp_stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+            )
+        opp_kill_moves = max_regular_moves(opp_effective_stamina)
+        opp_dist = shortest_distances(opp_r, opp_c, opp_kill_moves)
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
@@ -190,6 +225,15 @@ class PlayerController:
                 return Action.Move(DIR_MAP[(dr, dc)])
 
             if cell_owner(nr, nc) == self.opp and d_opp <= SAFE_DIST:
+                continue
+
+            opp_can_reach = opp_dist.get((nr, nc))
+            if (
+                opp_can_reach is not None and
+                owner_after_regular_move(nr, nc) != player_parity and
+                not board.cells[nr][nc].powerup and
+                not board.cells[nr][nc].hill_id
+            ):
                 continue
 
             visited.add((nr, nc))
