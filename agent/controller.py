@@ -333,8 +333,9 @@ class LightBoard:
                 score += 300  # captured hill: +40 max stamina equivalent
             elif opp >= threshold and opp > my:
                 score -= 300
-            # Individual cell control on uncaptured hills
-            score += (my - opp) * 60
+            else:
+                # Individual cell control on uncaptured hills
+                score += (my - opp) * 60
 
         return score
 
