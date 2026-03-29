@@ -206,9 +206,9 @@ class PlayerController:
                 if is_behind:
                     pscore += 200  # high: claim the neutral cell we just left
             else:
-                pscore += 10
                 if is_behind:
-                    pscore += 30  # low: behind reinforcement is lower priority
+                    continue  # SKIP behind reinforcement entirely - save stamina
+                pscore += 10
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
@@ -221,4 +221,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v79c"
+        return ""
