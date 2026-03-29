@@ -112,7 +112,7 @@ class PlayerController:
 
         while queue:
             r, c, first_dir, depth = queue.popleft()
-            if depth > 50:
+            if depth > 35:
                 break
 
             cell = board.cells[r][c]
@@ -125,8 +125,12 @@ class PlayerController:
                         priority = 2000 - depth * 20
                     else:
                         priority = 1000 - depth * 20
-                elif cell.owner_parity == 0:
-                    priority = 800 - depth * 15
+                else:
+                    # Our hill - defend it
+                    if cell.owner_parity == self.opp:
+                        priority = 1200 - depth * 20  # defend: opponent encroaching
+                    elif cell.owner_parity == 0:
+                        priority = 800 - depth * 15
 
             if cell.powerup:
                 pup_val = 1500 - depth * 25
@@ -149,7 +153,7 @@ class PlayerController:
                 best_priority = priority
                 best_first_dir = first_dir
 
-            if depth < 50:
+            if depth < 35:
                 for dr, dc in DR:
                     nr, nc = r + dr, c + dc
                     if (nr, nc) in visited or not valid(nr, nc):
