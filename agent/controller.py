@@ -68,6 +68,21 @@ class PlayerController:
                     count += 1
             return count
 
+        # Rare tactical exception: spend the second move only for an immediate kill.
+        if stamina >= GameConstants.EXTRA_MOVE_COST and cell_owner(opp_r, opp_c) != self.opp:
+            for dr, dc in DR:
+                nr, nc = my_r + dr, my_c + dc
+                if not valid(nr, nc):
+                    continue
+                if mdist(nr, nc, opp_r, opp_c) != 1:
+                    continue
+                kill_dir = (opp_r - nr, opp_c - nc)
+                if kill_dir in DIR_MAP:
+                    return [
+                        Action.Move(DIR_MAP[(dr, dc)]),
+                        Action.Move(DIR_MAP[kill_dir]),
+                    ]
+
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
         if stamina >= 50:  # 40 erase + 10 buffer
