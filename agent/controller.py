@@ -122,20 +122,20 @@ class PlayerController:
                 hill = board.hills[cell.hill_id]
                 if hill.controller_parity != player_parity:
                     if cell.owner_parity != player_parity:
-                        priority = 2000 - depth * 15  # shallower hill penalty
+                        priority = 2000 - depth * 20
                     else:
-                        priority = 1000 - depth * 15
+                        priority = 1000 - depth * 20
                 elif cell.owner_parity == 0:
                     priority = 800 - depth * 15
 
             if cell.powerup:
-                pup_val = 1500 - depth * 20
+                pup_val = 1500 - depth * 25
                 if stamina < 60:
                     pup_val += 300
                 priority = max(priority, pup_val)
 
             if cell.owner_parity == 0 and priority < -900:
-                priority = 900 - depth * 25  # steeper neutral penalty
+                priority = 900 - depth * 20
 
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
