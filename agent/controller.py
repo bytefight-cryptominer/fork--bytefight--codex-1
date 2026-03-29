@@ -70,9 +70,19 @@ class PlayerController:
                     count += 1
             return count
 
+        # --- Chase weak opponent for stamina collapse ---
+        if opp_stamina < 15 and stamina > 40:
+            d_to_opp = mdist(my_r, my_c, opp_r, opp_c)
+            if d_to_opp == 2:
+                for dr, dc in DR:
+                    nr, nc = my_r + dr, my_c + dc
+                    if valid(nr, nc) and mdist(nr, nc, opp_r, opp_c) < d_to_opp:
+                        if cell_owner(nr, nc) != self.opp or mdist(nr, nc, opp_r, opp_c) > SAFE_DIST:
+                            return [Action.Move(DIR_MAP[(dr, dc)])]
+
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
-        if stamina >= 60:  # 40 erase + 15 paint buffer
+        if stamina >= 55:  # 40 erase + 15 paint buffer
             for dr, dc in DR:
                 nr, nc = my_r + dr, my_c + dc
                 if not valid(nr, nc):
@@ -218,4 +228,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v75"
+        return ""
