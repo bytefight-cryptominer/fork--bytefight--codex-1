@@ -134,7 +134,7 @@ class PlayerController:
                 hill = board.hills[cell.hill_id]
                 if hill.controller_parity == self.opp:
                     if cell.owner_parity != player_parity:
-                        priority = 2500 - depth * 20
+                        priority = 3500 - depth * 20
                     else:
                         priority = 1200 - depth * 20
                 elif hill.controller_parity != player_parity:
@@ -163,7 +163,7 @@ class PlayerController:
                     priority = 1100 - depth * 20  # higher enemy territory priority
 
             if priority > -900:
-                pass  # removed paintable tiebreak
+                priority += count_paintable(r, c) * 2
 
             if priority > best_priority:
                 best_priority = priority
