@@ -21,7 +21,7 @@ class LightBoard:
     """
 
     __slots__ = (
-        'rows', 'cols', 'paint', 'walls', 'hill_ids', 'hill_set',
+        'rows', 'cols', 'paint', 'walls', 'hill_ids', 'hill_set', 'hill_groups',
         'my_r', 'my_c', 'opp_r', 'opp_c',
         'my_stamina', 'opp_stamina',
         'my_territory', 'opp_territory',
@@ -34,6 +34,7 @@ class LightBoard:
         self.walls = None  # 2D list of bool
         self.hill_ids = None  # 2D list of int (0 = not hill)
         self.hill_set = set()  # set of (r, c) that are hill cells
+        self.hill_groups = {}  # hill_id -> list[(r, c)]
         self.my_r = 0
         self.my_c = 0
         self.opp_r = 0
@@ -81,6 +82,7 @@ class LightBoard:
                     hill_row.append(hid)
                     if hid != 0:
                         lb.hill_set.add((r, c))
+                        lb.hill_groups.setdefault(hid, []).append((r, c))
             paint.append(paint_row)
             walls.append(wall_row)
             hill_ids.append(hill_row)
@@ -108,6 +110,7 @@ class LightBoard:
         lb.walls = self.walls
         lb.hill_ids = self.hill_ids
         lb.hill_set = self.hill_set
+        lb.hill_groups = self.hill_groups
         lb.my_r = self.my_r
         lb.my_c = self.my_c
         lb.opp_r = self.opp_r
@@ -310,19 +313,42 @@ class LightBoard:
     def evaluate(self):
         """
         Score the position from 'my' perspective.
-        territory diff * 2.0 + hill control * 100.0
+        Territory matters, but hill ownership should follow the real
+        threshold-based controller rules rather than raw hill-cell counts.
         """
+        score = (self.my_territory - self.opp_territory) * 2.0
         my_hills = 0
         opp_hills = 0
-        for (hr, hc) in self.hill_set:
-            p = self.paint[hr][hc]
-            if p == 1:
+        hill_progress = 0.0
+
+        for cells in self.hill_groups.values():
+            total = len(cells)
+            threshold = math.ceil(total * GameConstants.HILL_CONTROL_THRESHOLD)
+            my = 0
+            opp = 0
+            for hr, hc in cells:
+                p = self.paint[hr][hc]
+                if p == 1:
+                    my += 1
+                elif p == -1:
+                    opp += 1
+            diff = my - opp
+            hill_progress += 40.0 * diff / total
+            if my >= threshold and diff > 0:
                 my_hills += 1
-            elif p == -1:
+            elif opp >= threshold and diff < 0:
                 opp_hills += 1
 
-        score = (self.my_territory - self.opp_territory) * 2.0
-        score += my_hills * 100.0 - opp_hills * 100.0
+        score += hill_progress
+        score += (my_hills - opp_hills) * 500.0
+        if self.hill_groups:
+            domination_threshold = math.ceil(
+                len(self.hill_groups) * GameConstants.DOMINATION_WIN_THRESHOLD
+            )
+            if my_hills >= domination_threshold:
+                score += 5000.0
+            elif opp_hills >= domination_threshold:
+                score -= 5000.0
         return score
 
 
