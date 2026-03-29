@@ -394,7 +394,7 @@ class PlayerController:
         if not self.hill_cells:
             return set()
 
-        # Count controlled hills for DOMINATION prevention
+        hill_stats = []
         my_hills = 0
         opp_hills = 0
         for hid, cells in self.hill_cells.items():
@@ -402,21 +402,110 @@ class PlayerController:
             threshold = math.ceil(total * GameConstants.HILL_CONTROL_THRESHOLD)
             my = sum(1 for r, c in cells if board.cells[r][c].owner_parity == parity)
             opp = sum(1 for r, c in cells if board.cells[r][c].owner_parity == -parity)
-            if my >= threshold and my > opp:
+            captured_by_me = my >= threshold and my > opp
+            captured_by_opp = opp >= threshold and opp > my
+            if captured_by_me:
                 my_hills += 1
-            elif opp >= threshold and opp > my:
+            elif captured_by_opp:
                 opp_hills += 1
+            min_d_me = min(abs(me.loc.r - r) + abs(me.loc.c - c) for r, c in cells)
+            min_d_opp = None
+            if opp_r >= 0:
+                min_d_opp = min(abs(opp_r - r) + abs(opp_c - c) for r, c in cells)
+            hill_stats.append(
+                (
+                    hid,
+                    cells,
+                    total,
+                    threshold,
+                    my,
+                    opp,
+                    captured_by_me,
+                    captured_by_opp,
+                    min_d_me,
+                    min_d_opp,
+                )
+            )
+
+        domination_need = math.ceil(
+            len(hill_stats) * GameConstants.DOMINATION_WIN_THRESHOLD
+        )
+
+        if opp_hills + 1 >= domination_need:
+            blockers = []
+            for (
+                hid,
+                cells,
+                total,
+                threshold,
+                my,
+                opp,
+                captured_by_me,
+                captured_by_opp,
+                min_d_me,
+                min_d_opp,
+            ) in hill_stats:
+                opp_need = max(0, threshold - opp)
+                my_margin = my - opp
+                if not (
+                    captured_by_opp
+                    or opp_need <= 1
+                    or opp >= my
+                    or (captured_by_me and my_margin <= 2)
+                ):
+                    continue
+                own_factor = 2.0 * (my - opp) / total if total > 0 else 0.0
+                score = opp_need * 8 + min_d_me + own_factor
+                if min_d_opp is not None:
+                    score -= 0.35 * min_d_opp
+                blockers.append((score, hid))
+            if blockers:
+                blockers.sort()
+                return set(self.hill_cells[blockers[0][1]])
+
+        if my_hills + 1 >= domination_need:
+            clinchers = []
+            for (
+                hid,
+                cells,
+                total,
+                threshold,
+                my,
+                opp,
+                captured_by_me,
+                captured_by_opp,
+                min_d_me,
+                min_d_opp,
+            ) in hill_stats:
+                if captured_by_me:
+                    continue
+                my_need = max(0, threshold - my)
+                control_term = -2.0 * (my - opp) / total if total > 0 else 0.0
+                score = my_need * 8 + min_d_me + control_term
+                if min_d_opp is not None:
+                    score -= 0.5 * min_d_opp
+                clinchers.append((score, hid))
+            if clinchers:
+                clinchers.sort()
+                return set(self.hill_cells[clinchers[0][1]])
+
         panic = opp_hills >= my_hills  # Panic on ties too
 
         targets = []
-        for hid, cells in self.hill_cells.items():
-            my = sum(1 for r, c in cells if board.cells[r][c].owner_parity == parity)
-            opp = sum(1 for r, c in cells if board.cells[r][c].owner_parity == -parity)
-            total = len(cells)
-            threshold = math.ceil(total * GameConstants.HILL_CONTROL_THRESHOLD)
+        for (
+            hid,
+            cells,
+            total,
+            threshold,
+            my,
+            opp,
+            _captured_by_me,
+            _captured_by_opp,
+            min_d_me,
+            min_d_opp,
+        ) in hill_stats:
             if panic:
                 if opp >= my or my < threshold:
-                    min_d_me = min(abs(me.loc.r - r) + abs(me.loc.c - c) for r, c in cells)
                     own_factor = 2.0 * (my - opp) / total if total > 0 else 0
                     targets.append((min_d_me + own_factor, hid))
             else:
@@ -428,10 +517,8 @@ class PlayerController:
                 if not needs_target and my < threshold:
                     needs_target = True
                 if needs_target:
-                    min_d_me = min(abs(me.loc.r - r) + abs(me.loc.c - c) for r, c in cells)
                     own_factor = 2.0 * (my - opp) / total if total > 0 else 0
-                    if opp_r >= 0:
-                        min_d_opp = min(abs(opp_r - r) + abs(opp_c - c) for r, c in cells)
+                    if min_d_opp is not None:
                         score = min_d_me - 0.5 * min_d_opp + own_factor
                     else:
                         score = min_d_me + own_factor
