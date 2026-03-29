@@ -138,11 +138,12 @@ class LightBoard:
             self.opp_territory += 1
         return True
 
-    def _best_direction(self, r, c, opp_r, opp_c, depth=3):
+    def _best_direction_for(self, r, c, opp_r, opp_c, owner, depth=3):
         """
-        Simple BFS scoring to pick best direction from (r, c).
+        Simple BFS scoring to pick best direction for either side.
         Scores unpainted/enemy cells within depth, returns best (di index, score).
         """
+        enemy = -owner
         best_di = -1
         best_score = -1
 
@@ -156,10 +157,10 @@ class LightBoard:
             p = self.paint[nr][nc]
             if p == 0:
                 score += 2.0
-            elif p == -1:
+            elif p == enemy:
                 score += 1.5
 
-            if (nr, nc) in self.hill_set and p != 1:
+            if (nr, nc) in self.hill_set and p != owner:
                 score += 15.0
 
             # BFS deeper
@@ -180,9 +181,9 @@ class LightBoard:
                         p2 = self.paint[nr2][nc2]
                         if p2 == 0:
                             score += w
-                        elif p2 == -1:
+                        elif p2 == enemy:
                             score += w * 0.7
-                        if (nr2, nc2) in self.hill_set and p2 != 1:
+                        if (nr2, nc2) in self.hill_set and p2 != owner:
                             score += 15.0
                         next_f.append((nr2, nc2))
                     frontier = next_f
@@ -198,57 +199,90 @@ class LightBoard:
 
         return best_di, best_score
 
-    def simulate_storm_turn(self):
+    def _apply_regen_for(self, owner):
+        """Approximate stamina regen: base 5 + adj*2 + territory/8, capped at 100."""
+        if owner == 1:
+            r, c = self.my_r, self.my_c
+            territory = self.my_territory
+            stamina = self.my_stamina
+        else:
+            r, c = self.opp_r, self.opp_c
+            territory = self.opp_territory
+            stamina = self.opp_stamina
+
+        adj_count = 0
+        for di in range(4):
+            nr, nc = r + DR[di], c + DC[di]
+            if self._valid(nr, nc) and self.paint[nr][nc] == owner:
+                adj_count += 1
+        regen = 5 + adj_count * 2 + territory // 8
+        if regen > 50:
+            regen = 50
+        stamina = min(100, stamina + regen)
+        if owner == 1:
+            self.my_stamina = stamina
+        else:
+            self.opp_stamina = stamina
+
+    def _simulate_side_turn(self, owner):
         """
-        Simulate one simplified storm turn for 'me' (player index 1).
-        - Paint adjacent neutral cells
-        - Move in best direction
-        - Paint from new position
-        - Multi-move if stamina >= 25
-        - Apply approximate regen
+        Simulate one simplified turn for either side.
         """
-        r, c = self.my_r, self.my_c
-        opp_r, opp_c = self.opp_r, self.opp_c
-        stamina = self.my_stamina
+        if owner == 1:
+            r, c = self.my_r, self.my_c
+            opp_r, opp_c = self.opp_r, self.opp_c
+            stamina = self.my_stamina
+        else:
+            r, c = self.opp_r, self.opp_c
+            opp_r, opp_c = self.my_r, self.my_c
+            stamina = self.opp_stamina
 
         # Paint adjacent neutral cells from current position
         for di in range(4):
             nr, nc = r + DR[di], c + DC[di]
             if self._valid(nr, nc) and self.paint[nr][nc] == 0:
                 if stamina >= 30:
-                    self._paint_cell(nr, nc, 1)
+                    self._paint_cell(nr, nc, owner)
                     stamina -= 15
 
         # Find best direction
-        best_di, _ = self._best_direction(r, c, opp_r, opp_c, depth=3)
+        best_di, _ = self._best_direction_for(r, c, opp_r, opp_c, owner, depth=3)
         if best_di < 0:
-            # No valid move, skip turn
-            self.my_stamina = stamina
-            self._apply_regen()
+            if owner == 1:
+                self.my_stamina = stamina
+            else:
+                self.opp_stamina = stamina
+            self._apply_regen_for(owner)
             return
 
         # Move
         nr, nc = r + DR[best_di], c + DC[best_di]
-        self.my_r, self.my_c = nr, nc
+        if owner == 1:
+            self.my_r, self.my_c = nr, nc
+        else:
+            self.opp_r, self.opp_c = nr, nc
 
         # Paint from new position
         for di in range(4):
             pr, pc = nr + DR[di], nc + DC[di]
             if self._valid(pr, pc) and self.paint[pr][pc] == 0:
                 if stamina >= 15:
-                    self._paint_cell(pr, pc, 1)
+                    self._paint_cell(pr, pc, owner)
                     stamina -= 15
 
         # Multi-move if stamina allows
         if stamina >= 25:
-            best_di2, _ = self._best_direction(nr, nc, opp_r, opp_c, depth=2)
+            best_di2, _ = self._best_direction_for(nr, nc, opp_r, opp_c, owner, depth=2)
             if best_di2 >= 0:
                 nr2, nc2 = nr + DR[best_di2], nc + DC[best_di2]
                 if self._valid(nr2, nc2):
                     # Safety: don't step on enemy cell near opponent
                     opp_dist = abs(nr2 - opp_r) + abs(nc2 - opp_c) if opp_r >= 0 else 999
-                    if not (opp_dist <= 4 and self.paint[nr2][nc2] == -1):
-                        self.my_r, self.my_c = nr2, nc2
+                    if not (opp_dist <= 4 and self.paint[nr2][nc2] == -owner):
+                        if owner == 1:
+                            self.my_r, self.my_c = nr2, nc2
+                        else:
+                            self.opp_r, self.opp_c = nr2, nc2
                         stamina -= 10
 
                         # Paint from multi-move position
@@ -256,24 +290,22 @@ class LightBoard:
                             pr, pc = nr2 + DR[di], nc2 + DC[di]
                             if self._valid(pr, pc) and self.paint[pr][pc] == 0:
                                 if stamina >= 15:
-                                    self._paint_cell(pr, pc, 1)
+                                    self._paint_cell(pr, pc, owner)
                                     stamina -= 15
 
-        self.my_stamina = stamina
-        self._apply_regen()
+        if owner == 1:
+            self.my_stamina = stamina
+        else:
+            self.opp_stamina = stamina
+        self._apply_regen_for(owner)
 
-    def _apply_regen(self):
-        """Approximate stamina regen: base 5 + adj*2 + territory/8, capped at 100."""
-        r, c = self.my_r, self.my_c
-        adj_count = 0
-        for di in range(4):
-            nr, nc = r + DR[di], c + DC[di]
-            if self._valid(nr, nc) and self.paint[nr][nc] == 1:
-                adj_count += 1
-        regen = 5 + adj_count * 2 + self.my_territory // 8
-        if regen > 50:
-            regen = 50
-        self.my_stamina = min(100, self.my_stamina + regen)
+    def simulate_storm_turn(self):
+        """
+        Simulate one simplified future round: opponent turn, then our turn.
+        The first candidate move has already spent our current turn.
+        """
+        self._simulate_side_turn(-1)
+        self._simulate_side_turn(1)
 
     def evaluate(self):
         """
@@ -684,7 +716,7 @@ class PlayerController:
                         lb._paint_cell(pr, pc, 1)
                         stamina -= 15
             lb.my_stamina = stamina
-            lb._apply_regen()
+            lb._apply_regen_for(1)
 
             # Simulate subsequent turns
             for _ in range(sim_turns - 1):
