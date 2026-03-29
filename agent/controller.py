@@ -199,16 +199,20 @@ class PlayerController:
 
             pscore = 0
             if pcell.hill_id and pcell.hill_id != 0:
-                pscore += 200
+                if pcell.owner_parity == player_parity:
+                    pscore += 80  # reinforce hill cells only
+                else:
+                    pscore += 200
             is_behind = (pr == my_r and pc == my_c)
             if pcell.owner_parity == 0:
                 pscore += 100
                 if is_behind:
-                    pscore += 200  # high: claim the neutral cell we just left
-            else:
-                if is_behind:
-                    continue  # SKIP behind reinforcement entirely - save stamina
-                pscore += 10
+                    pscore += 200
+            elif pcell.owner_parity == player_parity:
+                if pcell.hill_id and pcell.hill_id != 0:
+                    pass  # already scored above
+                else:
+                    continue  # SKIP all non-hill reinforcement
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
@@ -221,4 +225,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v80b"
+        return ""
