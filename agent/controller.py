@@ -70,16 +70,6 @@ class PlayerController:
                     count += 1
             return count
 
-        # --- Chase weak opponent for stamina collapse ---
-        if opp_stamina < 15 and stamina > 40:
-            d_to_opp = mdist(my_r, my_c, opp_r, opp_c)
-            if d_to_opp == 2:
-                for dr, dc in DR:
-                    nr, nc = my_r + dr, my_c + dc
-                    if valid(nr, nc) and mdist(nr, nc, opp_r, opp_c) < d_to_opp:
-                        if cell_owner(nr, nc) != self.opp or mdist(nr, nc, opp_r, opp_c) > SAFE_DIST:
-                            return [Action.Move(DIR_MAP[(dr, dc)])]
-
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
         if stamina >= 55:  # 40 erase + 15 paint buffer
@@ -121,9 +111,12 @@ class PlayerController:
             visited.add((nr, nc))
             queue.append((nr, nc, DIR_MAP[(dr, dc)], 1))
 
+        # Adaptive depth: scale with map size
+        max_depth = min(rows + cols, 50)
+
         while queue:
             r, c, first_dir, depth = queue.popleft()
-            if depth > 35:
+            if depth > max_depth:
                 break
 
             cell = board.cells[r][c]
@@ -160,7 +153,7 @@ class PlayerController:
                 best_priority = priority
                 best_first_dir = first_dir
 
-            if depth < 35:
+            if depth < max_depth:
                 for dr, dc in DR:
                     nr, nc = r + dr, c + dc
                     if (nr, nc) in visited or not valid(nr, nc):
