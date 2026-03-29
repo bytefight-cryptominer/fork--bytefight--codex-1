@@ -120,11 +120,14 @@ class PlayerController:
 
         # --- BFS ---
         best_first_dir = None
-        best_priority = -999999
+        best_metric = None
 
         visited = set()
         visited.add((my_r, my_c))
         queue = deque()
+        seed_paintable = {}
+
+        start_moves = []
 
         for dr, dc in DR:
             nr, nc = my_r + dr, my_c + dc
@@ -141,8 +144,14 @@ class PlayerController:
             if cell_owner(nr, nc) == self.opp and d_opp <= SAFE_DIST:
                 continue
 
+            first_dir = DIR_MAP[(dr, dc)]
+            seed_score = (count_paintable(nr, nc), d_opp)
+            start_moves.append((seed_score, nr, nc, first_dir))
+            seed_paintable[first_dir] = count_paintable(nr, nc)
+
+        for _, nr, nc, first_dir in sorted(start_moves, reverse=True):
             visited.add((nr, nc))
-            queue.append((nr, nc, DIR_MAP[(dr, dc)], 1))
+            queue.append((nr, nc, first_dir, 1))
 
         while queue:
             r, c, first_dir, depth = queue.popleft()
@@ -187,8 +196,9 @@ class PlayerController:
             if priority > -900:
                 priority += count_paintable(r, c) * 3
 
-            if priority > best_priority:
-                best_priority = priority
+            metric = (priority, -depth, count_paintable(r, c), seed_paintable[first_dir])
+            if best_metric is None or metric > best_metric:
+                best_metric = metric
                 best_first_dir = first_dir
 
             if depth < 35:
