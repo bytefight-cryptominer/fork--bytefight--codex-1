@@ -124,7 +124,7 @@ class PlayerController:
 
         while queue:
             r, c, first_dir, depth = queue.popleft()
-            if depth > 35:
+            if depth > 40:
                 break
 
             cell = board.cells[r][c]
@@ -169,7 +169,7 @@ class PlayerController:
                 best_priority = priority
                 best_first_dir = first_dir
 
-            if depth < 35:
+            if depth < 40:
                 for dr, dc in DR:
                     nr, nc = r + dr, c + dc
                     if (nr, nc) in visited or not valid(nr, nc):
@@ -244,4 +244,4 @@ class PlayerController:
         return actions
 
     def commentate(self, board: Board, player_parity: int, time_left: Callable) -> str:
-        return "v92d"
+        return ""
