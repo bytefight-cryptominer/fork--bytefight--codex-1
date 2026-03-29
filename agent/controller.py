@@ -159,7 +159,8 @@ class PlayerController:
                     continue
                 ecell = board.cells[nr][nc]
                 if (ecell.hill_id and ecell.hill_id != 0 and
-                    ecell.owner_parity == self.opp):
+                    ecell.owner_parity == self.opp and
+                    board.hills[ecell.hill_id].controller_parity != player_parity):
                     if nr == opp_r and nc == opp_c:
                         continue
                     if stamina >= 65:
