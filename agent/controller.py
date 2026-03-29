@@ -1,5 +1,6 @@
 from collections.abc import Callable, Iterable
 from collections import deque
+from itertools import combinations
 from typing import Union, List
 
 from game import *
@@ -67,6 +68,63 @@ class PlayerController:
                 elif o == player_parity and abs(board.cells[nr][nc].paint_value) < GameConstants.MAX_PAINT_VALUE:
                     count += 1
             return count
+
+        def local_control_count(sim_board, loc):
+            total = 0
+            for r_off in range(-2, 3):
+                for c_off in range(-2, 3):
+                    nr, nc = loc.r + r_off, loc.c + c_off
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        if sim_board.cells[nr][nc].owner_parity == player_parity:
+                            total += 1
+            return total
+
+        def owned_hill_delta(sim_board):
+            total = 0
+            for r in range(rows):
+                for c in range(cols):
+                    cell = sim_board.cells[r][c]
+                    if not cell.hill_id:
+                        continue
+                    owner = cell.owner_parity
+                    if owner == player_parity:
+                        total += 1
+                    elif owner == self.opp:
+                        total -= 1
+            return total
+
+        def hill_control_delta(sim_board):
+            total = 0
+            for hill in sim_board.hills.values():
+                if hill.controller_parity == player_parity:
+                    total += 1
+                elif hill.controller_parity == self.opp:
+                    total -= 1
+            return total
+
+        def simulate_turn_prefix(actions):
+            sim_board = board.get_copy()
+            for action in actions:
+                if not sim_board.apply_action(player_parity, action):
+                    return None
+                if sim_board.get_player(player_parity).is_dead():
+                    return None
+                if sim_board.get_opponent(player_parity).is_dead():
+                    break
+            return sim_board
+
+        def score_local_paint_plan(sim_board):
+            sim_me = sim_board.get_player(player_parity)
+            sim_opp = sim_board.get_opponent(player_parity)
+            if sim_opp.is_dead():
+                return 10**9
+            return (
+                hill_control_delta(sim_board) * 4000
+                + owned_hill_delta(sim_board) * 250
+                + local_control_count(sim_board, sim_me.loc) * 120
+                + sim_board.get_territory_count(player_parity) * 15
+                + sim_me.stamina * 4
+            )
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
@@ -249,11 +307,34 @@ class PlayerController:
             paint_candidates.append((pscore, pr, pc))
 
         paint_candidates.sort(key=lambda x: -x[0])
-        for _, pr, pc in paint_candidates:
-            if paint_spent + GameConstants.PAINT_STAMINA_COST > paint_budget:
-                break
-            actions.append(Action.Paint(Location(pr, pc)))
-            paint_spent += GameConstants.PAINT_STAMINA_COST
+        max_paints = paint_budget // GameConstants.PAINT_STAMINA_COST
+        if len(paint_candidates) >= 2 and max_paints >= 1:
+            best_subset = []
+            best_subset_score = None
+            candidate_locs = [Location(pr, pc) for _, pr, pc in paint_candidates[:4]]
+            subset_limit = min(max_paints, len(candidate_locs))
+
+            for subset_size in range(subset_limit + 1):
+                for subset in combinations(candidate_locs, subset_size):
+                    trial_actions = [actions[0]]
+                    for loc in subset:
+                        trial_actions.append(Action.Paint(loc))
+                    sim_board = simulate_turn_prefix(trial_actions)
+                    if sim_board is None:
+                        continue
+                    score = score_local_paint_plan(sim_board)
+                    if best_subset_score is None or score > best_subset_score:
+                        best_subset_score = score
+                        best_subset = list(subset)
+
+            for loc in best_subset:
+                actions.append(Action.Paint(loc))
+        else:
+            for _, pr, pc in paint_candidates:
+                if paint_spent + GameConstants.PAINT_STAMINA_COST > paint_budget:
+                    break
+                actions.append(Action.Paint(Location(pr, pc)))
+                paint_spent += GameConstants.PAINT_STAMINA_COST
 
         return actions
 
