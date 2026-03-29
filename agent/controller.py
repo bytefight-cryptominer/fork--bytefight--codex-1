@@ -522,6 +522,40 @@ class PlayerController:
                 queue.append((nl.r, nl.c, depth + 1))
         return None
 
+    def _shortest_distances(self, board, start_r, start_c, max_depth):
+        queue = deque([(start_r, start_c, 0)])
+        dist = {(start_r, start_c): 0}
+        while queue:
+            r, c, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            for d in Direction.cardinals():
+                nl = Location(r, c) + d
+                if board.oob(nl) or board.cells[nl.r][nl.c].is_wall:
+                    continue
+                if (nl.r, nl.c) in dist:
+                    continue
+                dist[(nl.r, nl.c)] = depth + 1
+                queue.append((nl.r, nl.c, depth + 1))
+        return dist
+
+    def _owner_after_regular_move(self, board, r, c, parity):
+        paint_value = board.cells[r][c].paint_value
+        if paint_value == 0:
+            return 0
+        if (paint_value > 0) == (parity > 0):
+            return parity
+        next_value = paint_value + parity
+        if next_value == 0:
+            return 0
+        return -parity
+
+    def _unsafe_regular_landing(self, board, r, c, parity, opp_reachable):
+        return (
+            (r, c) in opp_reachable and
+            self._owner_after_regular_move(board, r, c, parity) != parity
+        )
+
     def bid(self, board: Board, player_parity: int, time_left: Callable) -> int:
         try:
             me = board.get_player(player_parity)
@@ -549,13 +583,16 @@ class PlayerController:
 
     def _find_move_candidates(self, board, me, parity, rows, cols,
                               opp_r, opp_c, danger, near_opp, target,
-                              effective_safe_dist=None, powerup_dir=None):
+                              effective_safe_dist=None, powerup_dir=None,
+                              opp_reachable=None):
         """
         Modified _find_move that returns a list of (score, direction) tuples
         for the top candidates, instead of just the best direction.
         """
         if effective_safe_dist is None:
             effective_safe_dist = self.safe_dist
+        if opp_reachable is None:
+            opp_reachable = {}
         start = me.loc
 
         dist_to_opp = self._path_dist_to_opp
@@ -586,6 +623,12 @@ class PlayerController:
                 continue
             if dist_to_opp <= effective_safe_dist and cell.owner_parity == -parity:
                 continue
+
+            seed_penalty = 0
+            if self._unsafe_regular_landing(board, nl.r, nl.c, parity, opp_reachable):
+                if not cell.powerup and (nl.r, nl.c) not in self.hill_set:
+                    continue
+                seed_penalty = 350
 
             # BFS from this neighbor up to bfs_depth, distance-weighted scoring
             score = 0
@@ -646,6 +689,8 @@ class PlayerController:
             # Powerup direction bias
             if powerup_dir and d == powerup_dir:
                 score += 0.5
+
+            score -= seed_penalty
 
             candidates.append((score, d))
 
@@ -802,6 +847,21 @@ class PlayerController:
             if kill_path:
                 return [Action.Move(move_dir) for move_dir in kill_path]
 
+        opp_reachable = {}
+        if opp:
+            opp_effective_stamina = opp.stamina
+            if board.cells[opp_r][opp_c].powerup:
+                opp_effective_stamina = min(
+                    opp.max_stamina,
+                    opp.stamina + GameConstants.STAMINA_POWERUP_AMOUNT,
+                )
+            opp_reachable = self._shortest_distances(
+                board,
+                opp_r,
+                opp_c,
+                self._max_regular_moves(opp_effective_stamina),
+            )
+
         # Track opponent position history for velocity
         if opp:
             self.opp_history.append((opp_r, opp_c))
@@ -881,7 +941,8 @@ class PlayerController:
         candidates = self._find_move_candidates(board, me, player_parity, rows, cols,
                                                 opp_r, opp_c, danger, near_opp, target,
                                                 effective_safe_dist=effective_safe_dist,
-                                                powerup_dir=powerup_dir)
+                                                powerup_dir=powerup_dir,
+                                                opp_reachable=opp_reachable)
 
         # Determine simulation budget based on time remaining
         tl = time_left()
