@@ -79,23 +79,11 @@ class PlayerController:
                     continue
                 ecell = board.cells[nr][nc]
                 if (ecell.hill_id and ecell.hill_id != 0 and
-                    ecell.owner_parity == self.opp):
+                    ecell.owner_parity == self.opp and
+                    board.hills[ecell.hill_id].controller_parity != player_parity):
                     if nr == opp_r and nc == opp_c:
                         continue
                     return [Action.Move(DIR_MAP[(dr, dc)], move_type=MoveType.ERASE)]
-
-        # --- Identify upcoming powerup spawn locations ---
-        upcoming_powerups = set()
-        cur_round = board.current_round
-        for i in range(board.event_pointer, len(board.powerup_schedule)):
-            fp = board.powerup_schedule[i]
-            rounds_until = fp.round_num - cur_round
-            if rounds_until > 15:
-                break
-            # Only target if we can reach it in time
-            d = mdist(my_r, my_c, fp.location.r, fp.location.c)
-            if d <= rounds_until + 3:
-                upcoming_powerups.add((fp.location.r, fp.location.c))
 
         # --- BFS ---
         best_first_dir = None
@@ -145,11 +133,6 @@ class PlayerController:
                 pup_val = 1500 - depth * 25
                 if stamina < 60:
                     pup_val += 300
-                priority = max(priority, pup_val)
-
-            # Upcoming powerup spawn location
-            if (r, c) in upcoming_powerups:
-                pup_val = 1400 - depth * 25
                 priority = max(priority, pup_val)
 
             if cell.owner_parity == 0 and priority < -900:
