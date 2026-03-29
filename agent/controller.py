@@ -7,7 +7,7 @@ from game import *
 
 class PlayerController:
     """
-    v124: v121 + restrict erase to opponent-controlled hills only.
+    v126: v124 + lower erase threshold from 55 to 50.
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -70,7 +70,7 @@ class PlayerController:
 
         # --- Erase step for hill cells with opponent paint ---
         # Erase opponent-painted hill cells: both attacking (uncaptured) and defending (ours)
-        if stamina >= 55:  # 40 erase + 15 paint buffer
+        if stamina >= 50:  # 40 erase + 10 buffer
             for dr, dc in DR:
                 nr, nc = my_r + dr, my_c + dc
                 if not valid(nr, nc):
