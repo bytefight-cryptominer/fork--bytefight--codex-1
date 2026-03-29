@@ -125,7 +125,7 @@ class PlayerController:
     def _rollout_value(self, board: Board, root_parity: int, rng: random.Random) -> float:
         state = board
         actor = -root_parity
-        for depth in range(3):
+        for depth in range(2):
             winner = state.get_winner()
             if winner is not None:
                 break
@@ -148,10 +148,13 @@ class PlayerController:
     def _sample_rollout_turn(
         self, board: Board, player_parity: int, rng: random.Random
     ) -> List[Action.Move | Action.Paint]:
-        candidates = self._generate_candidate_turns(board, player_parity)[:4]
+        candidates = self._generate_candidate_turns(board, player_parity)[:3]
         if not candidates:
             return self._heuristic_turn(board, player_parity)
         if len(candidates) == 1:
+            return candidates[0]
+
+        if rng.random() < 0.8:
             return candidates[0]
 
         scored: List[tuple[float, List[Action.Move | Action.Paint]]] = []
@@ -184,46 +187,32 @@ class PlayerController:
         opp = board.get_opponent(player_parity)
         distance = self._mdist(me.loc.r, me.loc.c, opp.loc.r, opp.loc.c)
 
-        tactical = False
-        if distance <= 7:
-            tactical = True
-        elif self._generate_erase_turns(board, player_parity):
-            tactical = True
-        else:
-            for hill in board.hills.values():
-                if hill.controller_parity == 0:
-                    continue
-                for loc in hill.cells:
-                    if self._mdist(me.loc.r, me.loc.c, loc.r, loc.c) <= 4:
-                        tactical = True
-                        break
-                if tactical:
-                    break
-
-        if not tactical:
+        erase_turns = self._generate_erase_turns(board, player_parity)
+        if distance > 4 and not erase_turns:
             return 0.0
 
         if remaining > 120.0:
-            budget = 0.085
+            budget = 0.03
         elif remaining > 60.0:
-            budget = 0.06
+            budget = 0.022
         else:
-            budget = 0.04
+            budget = 0.015
 
         if distance <= 4:
-            budget += 0.03
-        if me.stamina >= 80:
-            budget += 0.02
-        if self._generate_erase_turns(board, player_parity):
-            budget += 0.02
+            budget += 0.01
+        if erase_turns:
+            budget += 0.015
 
-        return min(0.14, budget)
+        return min(0.05, budget)
 
     def _generate_candidate_turns(
         self, board: Board, player_parity: int
     ) -> List[List[Action.Move | Action.Paint]]:
         candidates: List[List[Action.Move | Action.Paint]] = []
         seen: set[tuple] = set()
+        me = board.get_player(player_parity)
+        opp = board.get_opponent(player_parity)
+        distance = self._mdist(me.loc.r, me.loc.c, opp.loc.r, opp.loc.c)
 
         def add(turn: Action.Move | Action.Paint | Iterable[Action.Move | Action.Paint]) -> None:
             normalized = self._normalize_turn(turn)
@@ -237,15 +226,23 @@ class PlayerController:
 
         add(self._heuristic_turn(board, player_parity))
 
-        for _, turn in self._generate_erase_turns(board, player_parity)[:3]:
+        erase_turns = self._generate_erase_turns(board, player_parity)
+        for _, turn in erase_turns[:2]:
             add(turn)
 
-        for _, first_dir in self._rank_regular_moves(board, player_parity)[:3]:
-            add(self._build_regular_turn(board, player_parity, first_dir, max_paints=None))
-            add(self._build_regular_turn(board, player_parity, first_dir, max_paints=1))
-            add(self._build_regular_turn(board, player_parity, first_dir, max_paints=0))
+        ranked_moves = self._rank_regular_moves(board, player_parity)
+        if erase_turns:
+            for _, first_dir in ranked_moves[:2]:
+                add(self._build_regular_turn(board, player_parity, first_dir, max_paints=None))
+                add(self._build_regular_turn(board, player_parity, first_dir, max_paints=1))
+        elif distance <= 4:
+            if ranked_moves:
+                add(self._build_regular_turn(board, player_parity, ranked_moves[0][1], max_paints=1))
+                add(self._build_regular_turn(board, player_parity, ranked_moves[0][1], max_paints=0))
+            if len(ranked_moves) > 1:
+                add(self._build_regular_turn(board, player_parity, ranked_moves[1][1], max_paints=None))
 
-        return candidates[:9]
+        return candidates[:6]
 
     def _heuristic_turn(
         self, board: Board, player_parity: int
