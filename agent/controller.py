@@ -7,7 +7,7 @@ from game import *
 
 class PlayerController:
     """
-    v121: v117 + increased paintable tiebreak (*3 instead of *2).
+    v124: v121 + restrict erase to opponent-controlled hills only.
     """
 
     def __init__(self, player_parity: int, time_left: Callable):
@@ -78,7 +78,7 @@ class PlayerController:
                 ecell = board.cells[nr][nc]
                 if (ecell.hill_id and ecell.hill_id != 0 and
                     ecell.owner_parity == self.opp and
-                    board.hills[ecell.hill_id].controller_parity != player_parity):
+                    board.hills[ecell.hill_id].controller_parity == self.opp):
                     if nr == opp_r and nc == opp_c:
                         continue
                     # Erase + move + paint combo when possible
