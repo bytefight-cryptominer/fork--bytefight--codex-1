@@ -21,7 +21,7 @@ class LightBoard:
     """
 
     __slots__ = (
-        'rows', 'cols', 'paint', 'walls', 'hill_ids', 'hill_set',
+        'rows', 'cols', 'paint', 'walls', 'hill_ids', 'hill_set', 'powerups',
         'my_r', 'my_c', 'opp_r', 'opp_c',
         'my_stamina', 'opp_stamina',
         'my_territory', 'opp_territory',
@@ -34,6 +34,7 @@ class LightBoard:
         self.walls = None  # 2D list of bool
         self.hill_ids = None  # 2D list of int (0 = not hill)
         self.hill_set = set()  # set of (r, c) that are hill cells
+        self.powerups = None  # 2D list of bool
         self.my_r = 0
         self.my_c = 0
         self.opp_r = 0
@@ -54,18 +55,21 @@ class LightBoard:
         paint = []
         walls = []
         hill_ids = []
+        powerups = []
         my_t = 0
         opp_t = 0
         for r in range(rows):
             paint_row = []
             wall_row = []
             hill_row = []
+            powerup_row = []
             for c in range(cols):
                 cell = board.cells[r][c]
                 if cell.is_wall:
                     wall_row.append(True)
                     paint_row.append(0)
                     hill_row.append(0)
+                    powerup_row.append(False)
                 else:
                     wall_row.append(False)
                     op = cell.owner_parity
@@ -79,15 +83,18 @@ class LightBoard:
                         paint_row.append(0)
                     hid = cell.hill_id if cell.hill_id else 0
                     hill_row.append(hid)
+                    powerup_row.append(bool(cell.powerup))
                     if hid != 0:
                         lb.hill_set.add((r, c))
             paint.append(paint_row)
             walls.append(wall_row)
             hill_ids.append(hill_row)
+            powerups.append(powerup_row)
 
         lb.paint = paint
         lb.walls = walls
         lb.hill_ids = hill_ids
+        lb.powerups = powerups
         lb.my_territory = my_t
         lb.opp_territory = opp_t
 
@@ -108,6 +115,7 @@ class LightBoard:
         lb.walls = self.walls
         lb.hill_ids = self.hill_ids
         lb.hill_set = self.hill_set
+        lb.powerups = [row[:] for row in self.powerups]
         lb.my_r = self.my_r
         lb.my_c = self.my_c
         lb.opp_r = self.opp_r
@@ -137,6 +145,12 @@ class LightBoard:
         elif owner == -1:
             self.opp_territory += 1
         return True
+
+    def _collect_powerup(self, r, c, stamina):
+        if self.powerups[r][c]:
+            self.powerups[r][c] = False
+            stamina = min(100, stamina + GameConstants.STAMINA_POWERUP_AMOUNT)
+        return stamina
 
     def _best_direction_for(self, r, c, opp_r, opp_c, owner, depth=3):
         """
@@ -261,6 +275,7 @@ class LightBoard:
             self.my_r, self.my_c = nr, nc
         else:
             self.opp_r, self.opp_c = nr, nc
+        stamina = self._collect_powerup(nr, nc, stamina)
 
         # Paint from new position
         for di in range(4):
@@ -284,6 +299,7 @@ class LightBoard:
                         else:
                             self.opp_r, self.opp_c = nr2, nc2
                         stamina -= 10
+                        stamina = self._collect_powerup(nr2, nc2, stamina)
 
                         # Paint from multi-move position
                         for di in range(4):
@@ -708,7 +724,7 @@ class PlayerController:
             lb.my_c = nc
 
             # Paint from new position (simulate the initial paint actions)
-            stamina = lb.my_stamina
+            stamina = lb._collect_powerup(nr, nc, lb.my_stamina)
             for di in range(4):
                 pr, pc = nr + DR[di], nc + DC[di]
                 if lb._valid(pr, pc) and lb.paint[pr][pc] == 0:
