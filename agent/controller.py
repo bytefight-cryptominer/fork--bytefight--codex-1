@@ -156,11 +156,15 @@ class PlayerController:
 
             if cell.owner_parity == 0 and priority < -900:
                 priority = 900 - depth * 20
+                # Voronoi frontier bonus: cells equidistant from both players
+                opp_bfs_dist = mdist(r, c, opp_r, opp_c)
+                if abs(depth - opp_bfs_dist) <= 1:
+                    priority += 40  # contested frontier
 
             if cell.owner_parity == self.opp and priority < -900:
                 d_opp = mdist(r, c, opp_r, opp_c)
                 if d_opp > SAFE_DIST:
-                    priority = 1100 - depth * 20  # higher enemy territory priority
+                    priority = 1100 - depth * 20
 
             if priority > -900:
                 priority += count_paintable(r, c) * 2
@@ -190,33 +194,17 @@ class PlayerController:
                 return Action.Move(Direction.UP)
 
         actions: List = []
+        actions.append(Action.Move(best_first_dir))
+
         ddr, ddc = INV_DIR[best_first_dir]
         new_r, new_c = my_r + ddr, my_c + ddc
 
         if not valid(new_r, new_c):
-            return [Action.Move(best_first_dir)]
-
-        # Double-move through own territory to reach targets faster
-        # Only when the first cell is ours (we're traversing painted territory)
-        use_double = False
-        if (cell_owner(new_r, new_c) == player_parity and
-            stamina >= 25 and best_priority >= 800):
-            nr2, nc2 = new_r + ddr, new_c + ddc
-            if (valid(nr2, nc2) and mdist(nr2, nc2, opp_r, opp_c) > 0 and
-                not (cell_owner(nr2, nc2) == self.opp and mdist(nr2, nc2, opp_r, opp_c) <= SAFE_DIST)):
-                use_double = True
-                actions.append(Action.Move(best_first_dir))
-                actions.append(Action.Move(best_first_dir))
-                new_r, new_c = nr2, nc2
-            else:
-                actions.append(Action.Move(best_first_dir))
-        else:
-            actions.append(Action.Move(best_first_dir))
+            return actions
 
         # Late game conservation
-        extra_move = 10 if use_double else 0
         reserve = 25 if board.turn_count > 1400 else 10
-        paint_budget = stamina - reserve - extra_move
+        paint_budget = stamina - reserve
         paint_spent = 0
 
         paint_candidates = []
